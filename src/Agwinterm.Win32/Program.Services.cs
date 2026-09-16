@@ -1068,9 +1068,12 @@ internal partial class Program
     /// it is not the registered chord — a no-op when it is, which includes right after a set of the
     /// hotkey — so a hand edit takes effect at the next set or reload and a chord refused earlier (at
     /// startup, or by the last reload) is tried again; a refusal leaves the previous chord
-    /// registered while <c>config get</c> reports the file, and is noted. Returns the keys applied.
-    /// Runs on the UI thread.</summary>
-    private List<string> ReloadConfigApplying(string? alwaysKey, List<string>? notes)
+    /// registered while <c>config get</c> reports the file. The refusal is noted by every reload,
+    /// but by a set only when the hotkey text changed since the last load: a text that cannot
+    /// register would otherwise be reported again on every Settings toggle and slider step. Every
+    /// note goes into <paramref name="notes"/>, never straight to a toast — the toast has one slot.
+    /// Returns the keys applied. Runs on the UI thread.</summary>
+    private List<string> ReloadConfigApplying(string? alwaysKey, List<string> notes)
     {
         var before = ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
         _config = TerminalConfig.Load(ConfigPath);
@@ -1078,8 +1081,9 @@ internal partial class Program
         if (alwaysKey is not null && !changed.Contains(alwaysKey)) changed.Add(alwaysKey);
         if (SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
         {
+            bool report = alwaysKey is null || changed.Contains("quick-terminal-hotkey");
             changed.Remove("quick-terminal-hotkey");
-            if (notes is null) ShowToast(hotkeyError, 4000); else notes.Add(hotkeyError);
+            if (report) notes.Add(hotkeyError);
         }
         ApplyConfigKeys(changed, notes);
         return changed;
@@ -1091,15 +1095,14 @@ internal partial class Program
     /// <see cref="ReloadConfigApplying"/> with every key the file changed — one list of steps, so a
     /// reload cannot fall short of a set (the quick-terminal hotkey is the one step outside it: its
     /// registration can be refused, so <see cref="ReloadConfigApplying"/> runs it first and notes a
-    /// refusal). A step's note (the
-    /// backend and core switches announce themselves) is toasted, or collected into
-    /// <paramref name="notes"/> when the caller has a toast of its own to fold it into — the toast
-    /// has one slot, and a later one replaces an earlier one before it is ever drawn. Runs on the UI
-    /// thread.</summary>
-    private void ApplyConfigKeys(IReadOnlyCollection<string> keys, List<string>? notes = null)
+    /// refusal). A step's note — the backend and core switches announce themselves, and a font that
+    /// fell back says so — is collected into <paramref name="notes"/> for the caller's ONE toast:
+    /// the toast has one slot, and a note toasted here would be replaced by the next before it was
+    /// ever drawn. Runs on the UI thread.</summary>
+    private void ApplyConfigKeys(IReadOnlyCollection<string> keys, List<string> notes)
     {
         bool Has(string k) => keys.Contains(k);
-        void Note(string text, int ms) { if (notes is null) ShowToast(text, ms); else notes.Add(text); }
+        void Note(string text) => notes.Add(text);
         if (Has("quick-terminal-size") && _quickHost?._quickVisible == true) _quickHost.PositionQuick();
         if (Has("theme")) _theme = FindTheme(_config.Theme);
         if (Has("theme") || Has("theme-follow-system") || Has("theme-dark") || Has("theme-light")) ApplySystemTheme();
@@ -1113,14 +1116,14 @@ internal partial class Program
                 "server" => "server mode ON (experimental) — new sessions survive UI restarts; restart agwinterm to move existing ones",
                 "server-rust" => "Rust server mode ON (experimental) — new sessions live in the Rust pty-host; restart agwinterm to move existing ones",
                 _ => "in-process mode — new sessions run in the window process; restart agwinterm to convert existing ones",
-            }, 6000);
+            });
         }
         if (Has("emulator-core"))
         {
             // Live switch, same semantics as session-host: NEW sessions get the chosen core;
             // existing panes keep the one they were born with and converge on restart.
             ResolveEmulatorCore();
-            Note(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator", 6000);
+            Note(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator");
             _emulatorCoreNote = null;   // startup path only announces once
         }
         if (Has("cursor-blink-ms"))
@@ -1130,7 +1133,11 @@ internal partial class Program
         ApplyWindowOpacity();
         if (Has("compact-toolbar") || Has("toolbar-mode"))   // title-bar height changed → reflow the terminal grid
         { if (_active is not null) RegridSession(_active); if (_cover is not null) RegridCover(); }
-        if (Has("font-family") || Has("font-size")) RebuildFont();   // apply live to the running window
+        if (Has("font-family") || Has("font-size"))
+        {
+            RebuildFont();   // apply live to the running window; it toasts a fallback itself, and the
+            if (_fontFallbackNote is { } fontNote && !notes.Contains(fontNote)) Note(fontNote);   // caller's toast, which replaces that, must carry it too
+        }
         if (Has("sidebar-font-size")) RebuildSidebarFonts();         // apply the new sidebar name size live
         RequestRedraw();
         RefreshSettingsControls();                        // keep an open Settings window in sync

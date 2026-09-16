@@ -198,6 +198,18 @@ try {
         finally {if($probe -and -not [QuickProbe]::UnregisterHotKey([IntPtr]::Zero,0x615)){$cleanup=$false;throw 'Cannot release invalid-config probe'}}
     }finally{$locked.Dispose()}
 }finally{[IO.File]::WriteAllText($configFile,$beforeConfig);$null=Rpc 'config.set' @{key='quick-terminal-size';value='90'}}
+# A VALID chord edited into the file by hand is registered by the next `config set` of another key (the file is the
+# truth): the probe can no longer take Ctrl+Alt+Shift+F7 from outside; restoring the file and setting again releases it.
+try {
+    [IO.File]::AppendAllText($configFile,"`nquick-terminal-hotkey = ctrl+alt+shift+f7`n")
+    $null=Rpc 'config.set' @{key='quick-terminal-size';value='90'}
+    $probe=[QuickProbe]::RegisterHotKey([IntPtr]::Zero,0x615,0x4007,0x76)
+    try { Check 'a hand-edited valid hotkey is registered by a config set of another key' (-not $probe) }
+    finally { if($probe -and -not [QuickProbe]::UnregisterHotKey([IntPtr]::Zero,0x615)){$cleanup=$false;throw 'Cannot release hand-edit probe'} }
+}finally{[IO.File]::WriteAllText($configFile,$beforeConfig);$null=Rpc 'config.set' @{key='quick-terminal-size';value='90'}}
+$probe=[QuickProbe]::RegisterHotKey([IntPtr]::Zero,0x615,0x4007,0x76)
+try { Check 'restoring the file and setting again releases the hand-edited chord' $probe }
+finally { if($probe -and -not [QuickProbe]::UnregisterHotKey([IntPtr]::Zero,0x615)){$cleanup=$false;throw 'Cannot release hand-edit release probe'} }
 [void][HudOwnedJob]::SendMessageW($q,0x10,[IntPtr]::Zero,[IntPtr]::Zero)
 Check 'quick window close hides instead of destroying shell' (-not [QuickProbe]::IsWindowVisible($q) -and (Rpc 'session.text' -Window quick -AllowError).ok)
 $null=Rpc 'quick' @{op='on'}
