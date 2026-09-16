@@ -121,7 +121,9 @@ internal partial class Program
         var pt = new POINT { x = (int)(x0 * Scale), y = (int)(TitleBarH * Scale) };
         ClientToScreen(_hwnd, ref pt);
         _menuBarFocus = -1;
-        ShowMenuWindow(items, pt.x, pt.y);          // closes whatever was open, which clears _menuBarOpen
+        var barTop = new POINT { x = 0, y = 0 };
+        ClientToScreen(_hwnd, ref barTop);
+        ShowMenuWindow(items, pt.x, pt.y, barTop.y);   // closes whatever was open, which clears _menuBarOpen; flips above the bar, never over it
         if (_menuLevels.Count == 0) return;
         _menuBarOpen = menu;
         _menuByKeyboard = keyboard;

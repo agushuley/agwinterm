@@ -57,15 +57,18 @@ internal partial class Program
     private static bool MenuActionable(PalItem it) => (it.Run is not null || it.Submenu is not null) && it.Enabled?.Invoke() != false;
 
     /// <summary>Show <paramref name="items"/> as a popup menu at screen point (sx, sy).</summary>
-    private void ShowMenuWindow(List<PalItem> items, int sx, int sy)
+    /// <param name="flipTop">Screen y the popup must end ABOVE when it opens upward — a bar
+    /// dropdown passes the title bar's top, so the labels the pointer must still reach stay
+    /// uncovered; a context menu leaves it null and flips at its own anchor.</param>
+    private void ShowMenuWindow(List<PalItem> items, int sx, int sy, int? flipTop = null)
     {
         CloseMenuWindow();
         if (items.Count == 0) return;
-        OpenMenuLevel(items, sx, sy, parentRow: -1);
+        OpenMenuLevel(items, sx, sy, parentRow: -1, flipTop);
         if (_menuLevels.Count > 0) SetCapture(_menuLevels[0].Hwnd);   // native-menu input model: all mouse routes here until dismissed
     }
 
-    private void OpenMenuLevel(List<PalItem> items, int sx, int sy, int parentRow)
+    private void OpenMenuLevel(List<PalItem> items, int sx, int sy, int parentRow, int? flipTop = null)
     {
         var lv = new MenuLevel { Items = items, ParentRow = parentRow };
         lv.Gutter = items.Any(it => it.Checked) ? MenuCheckW : 0f;
@@ -85,15 +88,22 @@ internal partial class Program
         foreach (var it in items) lv.H += IsSep(it) ? MenuSepH : MenuRowH;
         int wpx = (int)(lv.W * Scale), hpx = (int)(lv.H * Scale);
 
-        // Clamp to the monitor work area; open upward when there's no room below (native behavior).
-        // A flyout that would run off the right edge opens to the LEFT of its parent instead.
+        // Clamp to the monitor work area. Below the anchor when it fits; else above it — above the
+        // BAR for a dropdown (flipTop), as a native menu bar flips, never over the labels — else,
+        // when it fits nowhere (a small screen, a tall menu), as far down as the work area allows:
+        // the old "up from the anchor" put a File dropdown over the whole bar on a 768-px screen,
+        // and the pointer could not reach View. A flyout that would run off the right edge opens to
+        // the LEFT of its parent instead.
         var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         GetMonitorInfoW(MonitorFromPoint(new POINT { x = sx, y = sy }, MONITOR_DEFAULTTONEAREST), ref mi);
         int x = sx;
         if (parentRow >= 0 && _menuLevels.Count > 0 && sx + wpx > mi.rcWork.right)
             x = _menuLevels[^1].X - wpx + (int)(4f * Scale);
         x = Math.Clamp(x, mi.rcWork.left, Math.Max(mi.rcWork.left, mi.rcWork.right - wpx));
-        int y = sy + hpx <= mi.rcWork.bottom ? sy : Math.Max(mi.rcWork.top, sy - hpx);
+        int top = flipTop ?? sy;
+        int y = sy + hpx <= mi.rcWork.bottom ? sy
+              : top - hpx >= mi.rcWork.top ? top - hpx
+              : Math.Max(mi.rcWork.top, mi.rcWork.bottom - hpx);
         lv.X = x; lv.Y = y;
 
         if (!_menuClassReady)

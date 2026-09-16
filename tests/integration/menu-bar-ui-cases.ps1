@@ -79,20 +79,30 @@ $popups=@([MenuBarNative]::Popups($job.Pid))
 Check 'the dropdown is a real popup window of the owned process' ($popups.Count-eq 1) "popups=$($popups.Count)"
 if($popups.Count-eq 1){ ShotWindow $popups[0] 'file-menu' }
 [void](Shot 'menu-bar-file-open')
+# A tall dropdown on a small screen (CI's 768 px): it opens above the bar, never over the labels.
+$pr=[MenuBarNative+RECT]::new();[void][MenuBarNative]::GetWindowRect($popups[0],[ref]$pr)
+$fileBox=(BarLabel 'File').Current.BoundingRectangle
+Check 'the File dropdown never covers the bar' ($pr.top-ge ($fileBox.Y+$fileBox.Height) -or $pr.bottom-le $fileBox.Y) "popup=$($pr.top)..$($pr.bottom) label=$($fileBox.Y)..$($fileBox.Y+$fileBox.Height)"
+# A posted press outside every level and off the bar (far negative client coordinates: what a captured press
+# outside looks like; -40,-40 would land on a label above the popup) closes it and touches nothing.
+$treeBefore=(Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress
+[void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,[IntPtr](([int64](-3000 -band 0xFFFF) -shl 16) -bor (-3000 -band 0xFFFF)))
+Check 'a press outside the popup closes it' (MenuWait {@(Rows 'File').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0}) "popups=$($popups.Count)"
+Check 'and changes nothing in the tree' (((Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress)-eq $treeBefore)
 # The popup routes a mouse message by the message's OWN point (client coordinates of the popup, which holds
-# the capture), not the pointer's: a posted press whose point lies on the View label switches menus. With
+# the capture), not the pointer's: with Help open (short: it fits under the bar on any screen), a posted press
+# whose point lies on the Navigate label — to the LEFT of the popup, a negative x — switches menus. With
 # GetCursorPos routing the real pointer would be anywhere but there, and this could not pass.
 function PopupPoint([IntPtr]$popup,[double]$sx,[double]$sy){ $r=[MenuBarNative+RECT]::new();[void][MenuBarNative]::GetWindowRect($popup,[ref]$r); $cx=[int]($sx-$r.left);$cy=[int]($sy-$r.top); [IntPtr](([int64]($cy -band 0xFFFF) -shl 16) -bor ($cx -band 0xFFFF)) }
-$viewBox=(BarLabel 'View').Current.BoundingRectangle
-[void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,(PopupPoint $popups[0] ($viewBox.X+$viewBox.Width/2) ($viewBox.Y+$viewBox.Height/2)))
-Check 'a posted press on the View label switches the dropdown to View' (MenuWait {@(Rows 'View').Count-gt 0 -and @(Rows 'File').Count-eq 0}) "view=$($viewBox.X),$($viewBox.Y) popups=$(@([MenuBarNative]::Popups($job.Pid)).Count)"
+Invoke-Element (BarLabel 'Help')
+Check 'Invoke on Help drops its menu' (MenuWait {$null-ne (Row 'Help' 'About agwinterm')})
 $popups=@([MenuBarNative]::Popups($job.Pid))
-# A posted press outside every level and off the bar (far negative client coordinates: what a captured press
-# outside looks like; -40,-40 would land on the File label above the popup) closes it and touches nothing.
-$treeBefore=(Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress
+$navBox=(BarLabel 'Navigate').Current.BoundingRectangle
+if($popups.Count-ge 1){ [void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,(PopupPoint $popups[0] ($navBox.X+$navBox.Width/2) ($navBox.Y+$navBox.Height/2))) }
+Check 'a posted press on the Navigate label switches the dropdown to Navigate' (MenuWait {@(Rows 'Navigate').Count-gt 0 -and @(Rows 'Help').Count-eq 0}) "nav=$($navBox.X),$($navBox.Y) popups=$($popups.Count)"
+$popups=@([MenuBarNative]::Popups($job.Pid))
 if($popups.Count-ge 1){ [void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,[IntPtr](([int64](-3000 -band 0xFFFF) -shl 16) -bor (-3000 -band 0xFFFF))) }
-Check 'a press outside the popup closes it' (MenuWait {@(Rows 'View').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0}) "popups=$($popups.Count)"
-Check 'and changes nothing in the tree' (((Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress)-eq $treeBefore)
+Check 'a press outside closes the switched dropdown too' (MenuWait {@(Rows 'Navigate').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0})
 Invoke-Element (BarLabel 'File')
 Check 'File opens again for the Invoke case' (MenuWait {@(Rows 'File').Count-gt 0})
 $before=@((Rpc 'tree').workspaces|ForEach-Object sessions).Count
