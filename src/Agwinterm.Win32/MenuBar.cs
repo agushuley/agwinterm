@@ -540,7 +540,7 @@ internal partial class Program
     private void ReloadConfigFromDisk()
     {
         var notes = new List<string>();
-        var changed = ReloadConfigApplying(null, notes, registerHotkey: true);
+        var changed = ReloadConfigApplying(null, notes);
         string summary = changed.Count == 0 ? "agwinterm.conf reloaded — nothing changed" : $"agwinterm.conf reloaded — {changed.Count} setting(s) applied";
         ShowToast(notes.Count == 0 ? summary : summary + "\n" + string.Join("\n", notes), notes.Count == 0 ? 2500 : 7000);
     }

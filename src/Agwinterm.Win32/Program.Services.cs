@@ -1049,7 +1049,12 @@ internal partial class Program
             if (SetQuickHotkey(value.Trim(), () => WriteConfigKey(key, value.Trim())) is { } error) return error;
         }
         else WriteConfigKey(key, value.Trim());
-        ReloadConfigApplying(key, notes: null, registerHotkey: false);   // reparse so clamping/validation is centralized; apply what changed
+        // Reparse so clamping/validation is centralized, and apply what the file changed — this key
+        // always. The steps' notes go into ONE toast: a set that also picks up hand edits of the
+        // backend and the core would otherwise show only the last note.
+        var notes = new List<string>();
+        ReloadConfigApplying(key, notes);
+        if (notes.Count > 0) ShowToast(string.Join("\n", notes), 7000);
         bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
         return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
     }
@@ -1059,18 +1064,19 @@ internal partial class Program
     /// even when its value reads the same. The file is the truth: a key edited by hand is applied by
     /// the next set or reload, so <c>_config</c> never holds an unapplied value (the theme picker and
     /// the prompt-engine writers update <c>_config</c> themselves as they apply, and a set of the
-    /// hotkey registers before it writes). With <paramref name="registerHotkey"/> the file's
-    /// quick-terminal hotkey is registered whenever it is not the registered chord — a no-op when it
-    /// is — so a chord refused earlier (at startup, or by the last reload) is tried again; a refusal
-    /// leaves the previous chord registered while <c>config get</c> reports the file, and is noted.
-    /// Returns the keys applied. Runs on the UI thread.</summary>
-    private List<string> ReloadConfigApplying(string? alwaysKey, List<string>? notes, bool registerHotkey)
+    /// hotkey registers before it writes). The file's quick-terminal hotkey is registered whenever
+    /// it is not the registered chord — a no-op when it is, which includes right after a set of the
+    /// hotkey — so a hand edit takes effect at the next set or reload and a chord refused earlier (at
+    /// startup, or by the last reload) is tried again; a refusal leaves the previous chord
+    /// registered while <c>config get</c> reports the file, and is noted. Returns the keys applied.
+    /// Runs on the UI thread.</summary>
+    private List<string> ReloadConfigApplying(string? alwaysKey, List<string>? notes)
     {
         var before = ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
         _config = TerminalConfig.Load(ConfigPath);
         var changed = ConfigKeys.Where(k => ConfigValue(k) != before[k]).ToList();
         if (alwaysKey is not null && !changed.Contains(alwaysKey)) changed.Add(alwaysKey);
-        if (registerHotkey && SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
+        if (SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
         {
             changed.Remove("quick-terminal-hotkey");
             if (notes is null) ShowToast(hotkeyError, 4000); else notes.Add(hotkeyError);
@@ -1084,7 +1090,8 @@ internal partial class Program
     /// the unconditional refresh. Both <c>config set</c> and File ▸ Reload Config reach it through
     /// <see cref="ReloadConfigApplying"/> with every key the file changed — one list of steps, so a
     /// reload cannot fall short of a set (the quick-terminal hotkey is the one step outside it: its
-    /// registration can be refused, so the callers run it first and report). A step's note (the
+    /// registration can be refused, so <see cref="ReloadConfigApplying"/> runs it first and notes a
+    /// refusal). A step's note (the
     /// backend and core switches announce themselves) is toasted, or collected into
     /// <paramref name="notes"/> when the caller has a toast of its own to fold it into — the toast
     /// has one slot, and a later one replaces an earlier one before it is ever drawn. Runs on the UI
