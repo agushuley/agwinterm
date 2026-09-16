@@ -1042,8 +1042,10 @@ internal partial class Program
             if (SetQuickHotkey(value.Trim(), () => WriteConfigKey(key, value.Trim())) is { } error) return error;
         }
         else WriteConfigKey(key, value.Trim());
+        _appliedConfig ??= ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);   // everything in _config is applied up to here
         _config = TerminalConfig.Load(ConfigPath);       // reparse so clamping/validation is centralized
         ApplyConfigKeys(new[] { key });
+        _appliedConfig[key] = ConfigValue(key);
         bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
         return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
     }
@@ -1053,10 +1055,21 @@ internal partial class Program
     /// the unconditional refresh. <c>config set</c> calls it with its one key; File ▸ Reload Config
     /// with every key the reload changed — one list of steps, so a reload cannot fall short of a set
     /// (the quick-terminal hotkey is the one step outside it: its registration can be refused, so the
-    /// callers run it first and report). Runs on the UI thread.</summary>
-    private void ApplyConfigKeys(IReadOnlyCollection<string> keys)
+    /// callers run it first and report). A step's note (the backend and core switches announce
+    /// themselves) is toasted, or collected into <paramref name="notes"/> when the caller has a
+    /// toast of its own to fold it into — the toast has one slot, and a later one replaces an
+    /// earlier one before it is ever drawn. Runs on the UI thread.</summary>
+    /// <summary>Every config key's value as last APPLIED — not as last loaded: <c>config set</c>
+    /// re-reads the whole file into <see cref="_config"/> and applies its one key, so a key edited by
+    /// hand since sits in <c>_config</c> unapplied. File ▸ Reload Config diffs against this, so that
+    /// edit is applied then. Null until the first set or reload: everything loaded at startup was
+    /// applied at startup.</summary>
+    private static Dictionary<string, string>? _appliedConfig;
+
+    private void ApplyConfigKeys(IReadOnlyCollection<string> keys, List<string>? notes = null)
     {
         bool Has(string k) => keys.Contains(k);
+        void Note(string text, int ms) { if (notes is null) ShowToast(text, ms); else notes.Add(text); }
         if (Has("quick-terminal-size") && _quickHost?._quickVisible == true) _quickHost.PositionQuick();
         if (Has("theme")) _theme = FindTheme(_config.Theme);
         if (Has("theme") || Has("theme-follow-system") || Has("theme-dark") || Has("theme-light")) ApplySystemTheme();
@@ -1065,7 +1078,7 @@ internal partial class Program
             // Live switch (#105 2d): NEW sessions use the chosen backend immediately; existing panes
             // keep the one they were born with (both kinds coexist fine) and converge on restart.
             _sessionBackend = SessionBackends.Resolve(_config.SessionHost, _argPipe ?? _appId, AppExePath);
-            ShowToast(_config.SessionHost switch
+            Note(_config.SessionHost switch
             {
                 "server" => "server mode ON (experimental) — new sessions survive UI restarts; restart agwinterm to move existing ones",
                 "server-rust" => "Rust server mode ON (experimental) — new sessions live in the Rust pty-host; restart agwinterm to move existing ones",
@@ -1077,7 +1090,7 @@ internal partial class Program
             // Live switch, same semantics as session-host: NEW sessions get the chosen core;
             // existing panes keep the one they were born with and converge on restart.
             ResolveEmulatorCore();
-            ShowToast(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator", 6000);
+            Note(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator", 6000);
             _emulatorCoreNote = null;   // startup path only announces once
         }
         if (Has("cursor-blink-ms"))

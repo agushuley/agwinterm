@@ -78,10 +78,19 @@ $popups=@([MenuBarNative]::Popups($job.Pid))
 Check 'the dropdown is a real popup window of the owned process' ($popups.Count-eq 1) "popups=$($popups.Count)"
 if($popups.Count-eq 1){ ShotWindow $popups[0] 'file-menu' }
 [void](Shot 'menu-bar-file-open')
-# A posted press outside the popup (negative client coordinates: what a captured press outside looks like) closes it and touches nothing.
+# The popup routes a mouse message by the message's OWN point (client coordinates of the popup, which holds
+# the capture), not the pointer's: a posted press whose point lies on the View label switches menus. With
+# GetCursorPos routing the real pointer would be anywhere but there, and this could not pass.
+function PopupPoint([IntPtr]$popup,[double]$sx,[double]$sy){ $r=[MenuBarNative+RECT]::new();[void][MenuBarNative]::GetWindowRect($popup,[ref]$r); $cx=[int]($sx-$r.left);$cy=[int]($sy-$r.top); [IntPtr](([int64]($cy -band 0xFFFF) -shl 16) -bor ($cx -band 0xFFFF)) }
+$viewBox=(BarLabel 'View').Current.BoundingRectangle
+[void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,(PopupPoint $popups[0] ($viewBox.X+$viewBox.Width/2) ($viewBox.Y+$viewBox.Height/2)))
+Check 'a posted press on the View label switches the dropdown to View' (MenuWait {@(Rows 'View').Count-gt 0 -and @(Rows 'File').Count-eq 0}) "view=$($viewBox.X),$($viewBox.Y) popups=$(@([MenuBarNative]::Popups($job.Pid)).Count)"
+$popups=@([MenuBarNative]::Popups($job.Pid))
+# A posted press outside every level and off the bar (far negative client coordinates: what a captured press
+# outside looks like; -40,-40 would land on the File label above the popup) closes it and touches nothing.
 $treeBefore=(Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress
-[void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,[IntPtr](([int64](-40 -band 0xFFFF) -shl 16) -bor (-40 -band 0xFFFF)))
-Check 'a press outside the popup closes it' (MenuWait {@(Rows 'File').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0})
+if($popups.Count-ge 1){ [void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,[IntPtr](([int64](-3000 -band 0xFFFF) -shl 16) -bor (-3000 -band 0xFFFF))) }
+Check 'a press outside the popup closes it' (MenuWait {@(Rows 'View').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0}) "popups=$($popups.Count)"
 Check 'and changes nothing in the tree' (((Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress)-eq $treeBefore)
 Invoke-Element (BarLabel 'File')
 Check 'File opens again for the Invoke case' (MenuWait {@(Rows 'File').Count-gt 0})
@@ -142,7 +151,7 @@ Check 'show-menu-bar = false removes the MenuBar element' (MenuWait {$null-eq (M
 AltTap
 Start-Sleep -Milliseconds 300
 PostKey $WM_KEYDOWN 0x58 0x002D0001; PostKey 0x102 0x78 0x002D0001; PostKey $WM_KEYUP 0x58 0xC02D0001   # x
-Check 'with the bar hidden an Alt tap takes no keys: the next key reaches the pane' (MenuWait {([string](Rpc 'session.text' @{}))-match '>\S*x'})   # \S*: the Alt+Numpad6 case above left the pane its Alt+6 (ESC 6), as a real one would "tail=$(([string](Rpc 'session.text' @{})).Trim() -replace '\s+',' ' | ForEach-Object { $_.Substring([Math]::Max(0,$_.Length-80)) })"
+Check 'with the bar hidden an Alt tap takes no keys: the next key reaches the pane' (MenuWait {([string](Rpc 'session.text' @{}))-match '>\S*x'}) "tail=$(([string](Rpc 'session.text' @{})).Trim() -replace '\s+',' ' | ForEach-Object { $_.Substring([Math]::Max(0,$_.Length-80)) })"   # \S*: the Alt+Numpad6 case above left the pane its Alt+6 (ESC 6), as a real one would
 $null=Rpc 'config.set' @{key='show-menu-bar';value='true'} -NoTarget
 Check 'show-menu-bar = true brings it back' (MenuWait {$null-ne (MenuBar)})
 Check 'config get reads the key' (([string](Rpc 'config.get' @{key='show-menu-bar'} -NoTarget))-match 'true')

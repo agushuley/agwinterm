@@ -321,18 +321,17 @@ internal partial class Program
                 // chord: a key that was queued or posted arrives after Alt is up, and the bit is what
                 // was true when it was pressed.
                 _altContext = msg == WM_SYSKEYDOWN && ((long)lParam & 0x20000000) != 0;
-                bool menuHadKeys = _menuLevels.Count > 0 || _menuBarFocus >= 0;
+                // TranslateMessage queued this key's WM_CHAR BEFORE the key-down ran, so a check of the
+                // menu state when the char arrives is a check of what the key-down left behind: a Space
+                // that ran a row would reach the pane or a palette. And a row that runs a modal loop
+                // (About, a close confirmation) pumps that char while the menu is already closed — from
+                // INSIDE OnKeyDown. So the decision is taken before the dispatch: a char-making key the
+                // menu or the bar owns eats its own char, once; withdrawn if the key-down was not consumed.
+                _menuAteChar = (_menuLevels.Count > 0 || _menuBarFocus >= 0) && KeyMakesChar((int)wParam);
                 try
                 {
-                    if (OnKeyDown((int)wParam))
-                    {
-                        // TranslateMessage queued this key's WM_CHAR BEFORE the key-down ran, so a check of
-                        // the menu state when the char arrives is a check of what the key-down left
-                        // behind: a Space that ran a row would then reach the pane or a palette. The
-                        // key-down that the menu consumed eats its own char, once.
-                        if (menuHadKeys && KeyMakesChar((int)wParam)) _menuAteChar = true;
-                        return IntPtr.Zero;
-                    }
+                    if (OnKeyDown((int)wParam)) return IntPtr.Zero;
+                    _menuAteChar = false;
                 }
                 finally { _altContext = false; }
                 break;
