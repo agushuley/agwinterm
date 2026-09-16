@@ -79,10 +79,18 @@ $popups=@([MenuBarNative]::Popups($job.Pid))
 Check 'the dropdown is a real popup window of the owned process' ($popups.Count-eq 1) "popups=$($popups.Count)"
 if($popups.Count-eq 1){ ShotWindow $popups[0] 'file-menu' }
 [void](Shot 'menu-bar-file-open')
-# A tall dropdown on a small screen (CI's 768 px): it opens above the bar, never over the labels.
+# A tall dropdown on a small screen (CI's 768 px): when it fits below the bar or above it, it must not cover the
+# labels; when it fits nowhere (CI: 667 px of rows in a 720 px work area) it stays inside the work area, as far
+# down as that allows, and covers the least of the bar it can (the keyboard still switches menus).
+Add-Type -AssemblyName System.Windows.Forms
+$wa=[System.Windows.Forms.Screen]::FromHandle($hwnd).WorkingArea
 $pr=[MenuBarNative+RECT]::new();[void][MenuBarNative]::GetWindowRect($popups[0],[ref]$pr)
 $fileBox=(BarLabel 'File').Current.BoundingRectangle
-Check 'the File dropdown never covers the bar' ($pr.top-ge ($fileBox.Y+$fileBox.Height) -or $pr.bottom-le $fileBox.Y) "popup=$($pr.top)..$($pr.bottom) label=$($fileBox.Y)..$($fileBox.Y+$fileBox.Height)"
+$barBottom=$fileBox.Y+$fileBox.Height; $popupH=$pr.bottom-$pr.top
+$fitsSomewhere=($popupH-le ($wa.Bottom-$barBottom)) -or ($popupH-le ($fileBox.Y-$wa.Top))
+$detail="popup=$($pr.top)..$($pr.bottom) label=$($fileBox.Y)..$barBottom work=$($wa.Top)..$($wa.Bottom)"
+if($fitsSomewhere){ Check 'the File dropdown does not cover the bar when it fits below or above it' ($pr.top-ge $barBottom -or $pr.bottom-le $fileBox.Y) $detail }
+else { Check 'the File dropdown fits nowhere here and stays inside the work area' ($pr.top-ge $wa.Top -and $pr.bottom-le $wa.Bottom) $detail }
 # A posted press outside every level and off the bar (far negative client coordinates: what a captured press
 # outside looks like; -40,-40 would land on a label above the popup) closes it and touches nothing.
 $treeBefore=(Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress
