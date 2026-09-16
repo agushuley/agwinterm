@@ -119,6 +119,12 @@ Everything is rebindable in `keymap.conf` (see `F1` for the live list).
 
 - **`%LOCALAPPDATA%\agwinterm\agwinterm.conf`** — appearance and behavior (also editable in Settings).
 - **`%LOCALAPPDATA%\agwinterm\keymap.conf`** — keybindings, custom commands and leader chords.
+  On first launch a commented starter is created from the built-in template (same text as
+  [keymap.conf.example](keymap.conf.example) in the repo). **`map`** takes one chord, or several
+  chords on one line separated by `|` (any count — not “exactly two”). **`unmap`** drops default or
+  custom bindings so the key reaches the shell; use `unmap ctrl+d` for a single chord, or
+  `unmap a | b` to clear several at once. Reload with **File → Reload Keymap** or
+  `agwintermctl keymap reload`.
 - `show-menu-bar = false` hides the title-bar menu bar (File ▸ Edit agwinterm.conf… opens the file).
 - Themes: the bundled set ships with the app; drop extra ghostty-format `*.conf` files in
   `%LOCALAPPDATA%\agwinterm\themes\`.

@@ -5,17 +5,17 @@ namespace Agwinterm.Core;
 /// <summary>
 /// Parses %LOCALAPPDATA%\agwinterm\keymap.conf into chord→action bindings and custom
 /// commands. Our own simple format (inspired by agterm, not copied):
-///   map &lt;chord&gt; = &lt;action&gt;          rebind a built-in action
-///   map &lt;chord&gt; | &lt;chord&gt; = &lt;action&gt;  bind alternatives (also after map leader)
+///   map &lt;chord&gt; = &lt;action&gt;          rebind one built-in action to one chord
+///   map &lt;chord&gt;[|&lt;chord&gt;...] = &lt;action&gt;  same action on several chords (| separates; any count)
 ///   map &lt;chord&gt; = command:&lt;Label&gt;  bind a chord to a custom command
 ///   command &lt;Label&gt; = &lt;text&gt;       run &lt;text&gt; (default: type it into the active session)
 ///   command [new|overlay|detached|send] &lt;Label&gt; = &lt;text&gt;   choose the run mode
 ///   leader = &lt;chord&gt;                 set the leader/prefix chord (tmux-style)
 ///   map leader &lt;chord&gt; = &lt;action|command:Label&gt;   bind a leader sequence
-///   unmap &lt;chord&gt; | &lt;chord&gt;            drop a default or prior map (chord reaches the shell)
+///   unmap &lt;chord&gt;[|&lt;chord&gt;...]            drop binding(s); each | adds another chord on the same line
 ///   '#' starts a comment; blank lines ignored.
 /// A canonical chord is "[ctrl+][alt+][shift+]&lt;key&gt;" where key ∈ a–z, 0–9, f1–f12,
-/// tab, enter, escape, space, up, down, left, right, or an OEM punctuation name
+/// tab, enter, escape, space, up, down, left, right, insert, delete (aliases ins/del), or an OEM punctuation name
 /// (comma, period, slash, semicolon, quote, backtick, minus, equals, lbracket, rbracket, backslash) —
 /// so shifted-symbol chords bind via shift+&lt;base&gt; (e.g. shift+slash for '?', shift+semicolon for ':').
 /// The command &lt;text&gt; may contain {AGW_*} tokens (expanded from the active session) and the
@@ -80,14 +80,15 @@ public static class Keymap
         """
         # agwinterm keymap (our own simple format)
         #
-        #   map <chord> = <action>          rebind a built-in action
-        #   map <chord> | <chord> = <action> bind alternatives (also map leader ...)
+        #   map <chord> = <action>          one chord → one built-in action
+        #   map <chord>[|<chord>...] = <action>   same action on many chords (| is not “exactly two”)
         #   map <chord> = command:<Label>   bind a chord to a custom command below
         #   command <Label> = <text>        run <text> (default: type it into the active session)
         #   command [new|overlay|detached] <Label> = <text>   choose the run mode
         #   leader = <chord>                set a leader/prefix chord (tmux-style)
         #   map leader <chord> = <action|command:Label>        bind a leader sequence
-        #   unmap <chord> | <chord>           drop a binding so the key reaches the shell
+        #   unmap <chord>                     drop one binding (key reaches the shell)
+        #   unmap <chord>[|<chord>...]         drop several on one line (same | rules as map)
         #
         # chords: ctrl+ alt+ shift+ then a key — a-z, 0-9, f1-f12,
         #         tab enter escape space up down left right, insert delete (ins/del),
@@ -110,6 +111,11 @@ public static class Keymap
         #
         # Examples (uncomment to use):
         # map escape = close_cover        # Esc hides the quick/scratch/overlay cover (falls through otherwise)
+        # map ctrl+g | alt+g = next_workspace   # pipe = more chords on the same line, not a second operand
+        # unmap ctrl+d                    # drop default split on Ctrl+D (^D reaches the shell)
+        # map ctrl+alt+d = split_pane
+        # map ctrl+insert = copy_selection
+        # map shift+insert = paste        # pair with copy-on-ctrl-c = false in agwinterm.conf for ^C interrupt
         # map ctrl+shift+g = command:Greet
         # command Greet = echo hello from {AGW_SESSION}
         # command [new] Log = echo running in {AGW_CWD}
