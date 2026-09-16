@@ -102,6 +102,13 @@ internal partial class Program
                 if (LoWord(wParam) == EDIT_ID && HiWord(wParam) == EN_KILLFOCUS) CommitRename();
                 return IntPtr.Zero;
 
+            case WM_SYSCOMMAND:
+                // The OS menu mode a lone Alt or F10 would enter: there is no OS menu here (the bar in
+                // the title bar is our own, MenuBar.cs), and swallowing it keeps a stray Alt from
+                // parking the keyboard in an invisible mode. Alt+Space still reaches the system menu.
+                if (((long)wParam & 0xFFF0) == SC_KEYMENU && (int)lParam != ' ') return IntPtr.Zero;
+                break;
+
             case WM_CTLCOLOREDIT: // highlight-matching background + white text (wParam = HDC)
                 SetTextColor(wParam, RGB(255, 255, 255));
                 SetBkColor(wParam, RGB(41, 51, 64));
@@ -166,6 +173,7 @@ internal partial class Program
 
             case WM_KILLFOCUS:
                 if (_isQuickWindow) ReleaseQuickKeys();
+                _altArmed = false;
                 DropCaret();
                 return IntPtr.Zero;
 
@@ -287,18 +295,40 @@ internal partial class Program
 
             case WM_KEYDOWN:
             case WM_SYSKEYDOWN:
+                // Menu bar (MenuBar.cs): a lone Alt tap focuses it, so Alt going down arms it and any
+                // other key disarms it; Alt+letter with the context bit set is a mnemonic — read here,
+                // off lParam, so a posted key counts as much as a typed one.
+                if ((int)wParam == VK_MENU) { if (msg == WM_SYSKEYDOWN && ((long)lParam & 0x40000000) == 0) _altArmed = MenuBarUsable; }
+                else
+                {
+                    _altArmed = false;
+                    if (msg == WM_SYSKEYDOWN && ((long)lParam & 0x20000000) != 0 && MenuBarMnemonic((int)wParam)) return IntPtr.Zero;
+                }
                 if (_dragging && (int)wParam == VK_ESCAPE)
                 {
                     _dragging = false; _sbPress = false; _pressItem = null; _dragItem = null;
                     ReleaseCapture(); RequestRedraw(); return IntPtr.Zero;
                 }
-                if (OnKeyDown((int)wParam)) return IntPtr.Zero;
+                // The message's own Alt state (the WM_SYSKEYDOWN context bit) backs GetKeyState for the
+                // chord: a key that was queued or posted arrives after Alt is up, and the bit is what
+                // was true when it was pressed.
+                _altContext = msg == WM_SYSKEYDOWN && ((long)lParam & 0x20000000) != 0;
+                try { if (OnKeyDown((int)wParam)) return IntPtr.Zero; }
+                finally { _altContext = false; }
                 break;
 
             case WM_KEYUP:
             case WM_SYSKEYUP:
                 // win32-input-mode: emit the paired key-UP (Alt releases arrive as WM_SYSKEYUP).
                 Win32KeyUp((int)wParam);
+                if (msg == WM_SYSKEYUP && (int)wParam == VK_MENU && _altArmed)
+                {
+                    // A lone Alt tap: the bar takes the keyboard focus (or gives it back), and the tap
+                    // never reaches DefWindowProc's SC_KEYMENU.
+                    _altArmed = false;
+                    if (_menuBarFocus >= 0) LeaveMenuBar(); else if (MenuBarUsable) FocusMenuBar(0);
+                    return IntPtr.Zero;
+                }
                 if (msg == WM_SYSKEYUP) break;
                 // Committing the MRU walk happens when Ctrl is finally released (any key-up where Ctrl
                 // is no longer held is exactly the Ctrl-up event; a Tab-up with Ctrl still down is ignored).
@@ -331,6 +361,7 @@ internal partial class Program
                 {
                     char c = (char)wParam;
                     if (_kittyAteChar) { _kittyAteChar = false; return IntPtr.Zero; }   // OnKeyDown already CSI-u-encoded this key
+                    if (_menuLevels.Count > 0 || _menuBarFocus >= 0) return IntPtr.Zero;   // the menu owns the keyboard; a mnemonic letter is not text
                     if (CloseExitedOverlayOnKey()) return IntPtr.Zero;   // the any-key close of an exited --wait overlay (cover, else the focused pane's — P5)
                     if (_setOpen)
                     {
@@ -373,6 +404,11 @@ internal partial class Program
                     }
                     if (_setOpen) { SettingsClick(mx, my); return IntPtr.Zero; }
                     if (_palette != PaletteKind.None) { PaletteClick(mx, my); return IntPtr.Zero; }
+                    _altArmed = false;
+                    if (_menuBarFocus >= 0) LeaveMenuBar();
+                    // A bar label opens its menu on the press, as a native menu does (while a menu is up
+                    // the popup holds the capture and routes this click itself).
+                    if (my < (int)TitleBarH && MenuBarUsable && MenuBarLabelAt(mx) is int menuLabel) { OpenMenuBar(menuLabel); return IntPtr.Zero; }
                     if (_dashboardOpen) { DashboardClick(mx, my, doubleClick: false); return IntPtr.Zero; }
                     // Notification banner: clicking it jumps to the raising session and dismisses.
                     if (_toastText is not null && _toastTarget is not null &&
@@ -605,6 +641,7 @@ internal partial class Program
             case WM_ACTIVATE:
                 bool wasActive = _windowActive;
                 _windowActive = LoWord(wParam) != 0;   // WA_ACTIVE/WA_CLICKACTIVE vs WA_INACTIVE (drives unfocused dim)
+                if (!_windowActive) { _altArmed = false; LeaveMenuBar(); }   // an Alt+Tab away is not a lone Alt tap
                 // Focus reporting (DECSET ?1004): on a real focus transition, tell the active pane's
                 // app the terminal gained (ESC[I) or lost (ESC[O) focus, so it can pause/resume.
                 if (_windowActive != wasActive && _session is { } fs && fs.Emulator.FocusReporting)

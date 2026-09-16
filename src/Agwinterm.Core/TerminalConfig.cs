@@ -196,6 +196,9 @@ public sealed class TerminalConfig
     public bool ShowSplitButton { get; set; } = true;
     public bool ShowDashboardButton { get; set; } = true;
     public bool ShowQuickButton { get; set; } = true;
+    /// <summary>The File / View / Navigate / Help menu bar in the title bar. On by default; the hidden
+    /// toolbar mode shows no chrome and so no bar whatever this says.</summary>
+    public bool ShowMenuBar { get; set; } = true;
     public int QuickTerminalSize { get; set; } = QuickTerminalGeometry.DefaultPercent;
     public string QuickTerminalHotkey { get; set; } = "";
 
@@ -383,6 +386,8 @@ public sealed class TerminalConfig
         show-split-button = true
         show-dashboard-button = true
         show-quick-button = true
+        # The menu bar (File, View, Navigate, Help) drawn in the title bar. Alt or F10 focuses it.
+        show-menu-bar = true
 
         # Detached quick terminal: percent of the pointer monitor's usable width and height (40..90).
         quick-terminal-size = 70
@@ -480,6 +485,7 @@ public sealed class TerminalConfig
                 case "show-split-button": cfg.ShowSplitButton = ParseBool(val, cfg.ShowSplitButton); break;
                 case "show-dashboard-button": cfg.ShowDashboardButton = ParseBool(val, cfg.ShowDashboardButton); break;
                 case "show-quick-button": cfg.ShowQuickButton = ParseBool(val, cfg.ShowQuickButton); break;
+                case "show-menu-bar": cfg.ShowMenuBar = ParseBool(val, cfg.ShowMenuBar); break;
                 case "quick-terminal-size": if (int.TryParse(val, out var qp)) cfg.QuickTerminalSize = Math.Clamp(qp, 40, 90); break;
                 case "quick-terminal-hotkey": cfg.QuickTerminalHotkey = val; break;
                 case "attention-button": cfg.AttentionButton = ParseBool(val, cfg.AttentionButton); break;

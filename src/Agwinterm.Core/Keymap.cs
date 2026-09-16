@@ -240,6 +240,32 @@ public static class Keymap
             or "minus" or "equals" or "lbracket" or "rbracket" or "backslash";
     }
 
+    /// <summary>Whether <paramref name="action"/> is a built-in action id a keymap can bind.</summary>
+    public static bool IsBuiltinAction(string action) => ValidActions.Contains(action);
+
+    /// <summary>A canonical chord as people write it — <c>ctrl+shift+t</c> → <c>Ctrl+Shift+T</c>,
+    /// <c>ctrl+backtick</c> → <c>Ctrl+`</c> — for menu rows, palette hints and help.</summary>
+    public static string DisplayChord(string chord)
+    {
+        var parts = chord.Split('+', StringSplitOptions.RemoveEmptyEntries);
+        var sb = new System.Text.StringBuilder();
+        foreach (var p in parts)
+        {
+            if (sb.Length > 0) sb.Append('+');
+            sb.Append(p switch
+            {
+                "ctrl" => "Ctrl", "alt" => "Alt", "shift" => "Shift",
+                "tab" => "Tab", "enter" => "Enter", "escape" => "Esc", "space" => "Space",
+                "up" => "Up", "down" => "Down", "left" => "Left", "right" => "Right",
+                "comma" => ",", "period" => ".", "slash" => "/", "semicolon" => ";", "quote" => "'",
+                "backtick" => "`", "minus" => "-", "equals" => "=", "lbracket" => "[", "rbracket" => "]", "backslash" => "\\",
+                _ when p.Length >= 2 && p[0] == 'f' && char.IsDigit(p[1]) => "F" + p[1..],
+                _ => p.ToUpperInvariant(),
+            });
+        }
+        return sb.ToString();
+    }
+
     /// <summary>Build the canonical chord for a live keypress, or null if the key isn't bindable.</summary>
     public static string? ChordFor(int vk, bool ctrl, bool alt, bool shift)
     {

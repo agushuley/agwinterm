@@ -58,6 +58,8 @@ internal partial class Program
             "FOCUS & NAVIGATION",
             "F6            move focus between terminal and sidebar (arrows + Enter there)",
             "F1            this help (including while full-screen terminal apps run)",
+            "Alt or F10    menu bar (File  View  Navigate  Help): arrows move, Enter opens, Esc leaves",
+            "Alt+F/V/N/H   open a menu directly (a keymap chord on the same keys wins)",
             "Esc           close overlays (help, settings, palettes, search)",
             "",
             "KEY BINDINGS (effective — keymap.conf applied)",

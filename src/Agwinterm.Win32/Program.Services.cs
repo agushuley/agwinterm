@@ -268,6 +268,7 @@ internal partial class Program
     private void DrawTitleBar(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush)
     {
         _titleButtons.Clear();
+        _menuBarLabels.Clear(); _menuBarRect = default; _titleTextRect = default;
         if (ToolbarHidden) return;   // hidden toolbar: no chrome at all (full-bleed terminal)
         int cw = ClientW();
         brush.Color = ChromeBg;
@@ -306,7 +307,11 @@ internal partial class Program
         string title = _active is not null ? SessionDisplayName(_active) : AppName;
         // 4. Attention bell (can be hidden via settings; when hidden it reserves no space).
         bool showBell = _config.AttentionButton;
-        float titleX = _sidebarW > 0 ? _sidebarW + 10f : togX + togW + 8f;
+        // The menu bar (MenuBar.cs) sits where the title used to start and the title moves right by
+        // it; a label that would reach the right group is dropped rather than drawn over it.
+        float barX = _sidebarW > 0 ? _sidebarW + 10f : togX + togW + 8f;
+        float barEnd = DrawMenuBar(rt, brush, barX, rgLeft - 120f);
+        float titleX = barEnd > barX ? barEnd + 12f : barX;
         float bellW = showBell ? 34f : 0f, bellGap = showBell ? 8f : 0f;
         // The recents clock (drawn after the bell while the sidebar is hidden) is reserved HERE like the
         // bell, so an ellipsized title cannot push it over the right group (#246): bellW wide + its 2 px gap.
@@ -346,6 +351,7 @@ internal partial class Program
         float titleW = MathF.Max(30f, MathF.Min(titleMeasured, titleShare - ctxReserve));
         brush.Color = ChromeText;
         rt.DrawText(title, _uiTitle, new Rect(titleX, 0f, titleW, TitleBarH), brush);  // one vertically-centered, ellipsized row
+        _titleTextRect = new Rect(titleX, 0f, titleW, TitleBarH);   // File ▸ Rename Window… puts its field here
         float runEnd = titleX + titleW;   // right edge of the title run (title, pills, then the context suffix when set)
         float pillX = runEnd + 10f;       // anchored on the title alone — never on the context
         foreach (var (label, bg, w) in pills)
@@ -921,7 +927,7 @@ internal partial class Program
         "new-session-dir", "right-click-paste", "copy-on-select", "copy-on-ctrl-c", "word-delimiters", "desktop-notifications", "shell-integration",
         "restore-commands", "restore-buffer", "blocked-sound", "notification-sound", "omp-theme", "omp-integration", "prompt-engine", "starship-theme",
         "new-session-dir-mode", "confirm-close-session", "compact-toolbar", "toolbar-mode", "notification-badges", "workspace-add-button",
-        "show-scratch-button", "show-split-button", "show-dashboard-button", "show-quick-button",
+        "show-scratch-button", "show-split-button", "show-dashboard-button", "show-quick-button", "show-menu-bar",
         "quick-terminal-size", "quick-terminal-hotkey",
         "attention-button", "status-color-active", "status-color-blocked", "status-color-completed",
         "paste-protection", "clipboard-write", "notification-flash", "claude-update-check", "update-check",
@@ -1000,6 +1006,7 @@ internal partial class Program
         "show-split-button" => _config.ShowSplitButton ? "true" : "false",
         "show-dashboard-button" => _config.ShowDashboardButton ? "true" : "false",
         "show-quick-button" => _config.ShowQuickButton ? "true" : "false",
+        "show-menu-bar" => _config.ShowMenuBar ? "true" : "false",
         "quick-terminal-size" => _config.QuickTerminalSize.ToString(),
         "quick-terminal-hotkey" => _config.QuickTerminalHotkey,
         "notification-flash" => _config.NotificationFlash,

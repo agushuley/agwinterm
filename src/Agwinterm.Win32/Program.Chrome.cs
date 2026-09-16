@@ -398,6 +398,7 @@ internal partial class Program
         {
             if (item is Ses s) { s.Name = name; s.CustomName = name; } // CustomName drives the title bar
             else if (item is Workspace w) w.Name = name;
+            else if (ReferenceEquals(item, WindowRenameMarker)) RenameThisWindow(name);   // File ▸ Rename Window…
         }
         DestroyEditWindow(h);
         RequestRedraw();
@@ -597,7 +598,6 @@ internal partial class Program
     private void InvalidateSessionSelectors()
     {
         CloseDashboard(); ClosePalette(); CloseMenuWindow();
-        _menuItems.Clear(); _menuSel = -1;
         _sidebarRows.Clear(); _sidebarNames.Clear();
         DismissHoverTip(); ClearLinkHover();
     }
@@ -1146,7 +1146,9 @@ internal partial class Program
 
     private void RunPaletteSelection()
     {
-        Action? run = (_palSel >= 0 && _palSel < _palItems.Count) ? _palItems[_palSel].Run : null;
+        var item = (_palSel >= 0 && _palSel < _palItems.Count) ? _palItems[_palSel] : null;
+        if (item?.Enabled?.Invoke() == false) return;   // an inert row neither runs nor dismisses (agterm's palette rule)
+        Action? run = item?.Run;
         ClosePalette();
         run?.Invoke();
     }
@@ -1220,7 +1222,7 @@ internal partial class Program
             float tx = px + 16f;
             if (it.Dot is AgentStatus ds) { brush.Color = StatusDot(ds); rt.FillEllipse(new Ellipse(new System.Numerics.Vector2(px + 16f, ry + rowH / 2f), 4.5f, 4.5f), brush); tx = px + 30f; }
             bool hasSub = it.Secondary.Length > 0;
-            brush.Color = it.Run is null ? ChromeDim : (idx == _palSel ? SbActiveText : ChromeText);
+            brush.Color = it.Run is null || it.Enabled?.Invoke() == false ? ChromeDim : (idx == _palSel ? SbActiveText : ChromeText);
             float lw = pw - (tx - px) - (it.Hint.Length > 0 ? 80f : 20f);
             rt.DrawText(it.Label, _uiFont, new Rect(tx, ry + (hasSub ? 3f : 0f), lw, hasSub ? 20f : rowH), brush, DrawTextOptions.Clip);
             if (hasSub) { brush.Color = ChromeDim; rt.DrawText(it.Secondary, _uiSmall, new Rect(tx, ry + 20f, pw - (tx - px) - 20f, 16f), brush, DrawTextOptions.Clip); }
@@ -1419,7 +1421,7 @@ internal partial class Program
         if (hit is not null)
         {
             _hotPaint = hit; _hotAlpha = 1f;   // light instantly on hover-in
-            if (Uia.ClientsListening) _uia.Announce(ChromeButtonLabel(hit) + " button");   // speak the hovered button
+            if (Uia.ClientsListening) _uia.Announce(hit.StartsWith(MenuIdPrefix, StringComparison.Ordinal) ? ChromeButtonLabel(hit) : ChromeButtonLabel(hit) + " button");   // speak the hovered button
         }
         else
         {
@@ -1454,7 +1456,7 @@ internal partial class Program
     private void TipTick()
     {
         KillTimer(_hwnd, (IntPtr)TipTimer);
-        _tipText = _hotBtn is not null ? ChromeButtonLabel(_hotBtn) : _sidebarTip?.Text;
+        _tipText = _hotBtn is not null ? (_hotBtn.StartsWith(MenuIdPrefix, StringComparison.Ordinal) ? null : ChromeButtonLabel(_hotBtn)) : _sidebarTip?.Text;   // a bar label needs no tip
         RequestRedraw();
     }
 
@@ -1516,6 +1518,8 @@ internal partial class Program
         "flag" => "Flagged view",
         "unfocus" => "Unfocus workspace",
         "settings" => "Settings",
+        _ when a.StartsWith(MenuIdPrefix, StringComparison.Ordinal) && int.TryParse(a[MenuIdPrefix.Length..], out int mi) && mi < Agwinterm.Core.MenuModel.Menus.Count
+            => Agwinterm.Core.MenuModel.Menus[mi].Title + " menu",
         _ => a,
     };
 
@@ -1569,6 +1573,9 @@ internal partial class Program
             case "flag": ToggleFlaggedView(); break;   // footer flag button toggles the flagged working-set view
             case "unfocus": _focusedWorkspaceId = null; RequestRedraw(); SaveState(); break;
             case "settings": OpenSettingsWindow(); break;
+            case var m when m.StartsWith(MenuIdPrefix, StringComparison.Ordinal):
+                if (int.TryParse(m[MenuIdPrefix.Length..], out int mi) && MenuBarUsable) OpenMenuBar(mi);
+                break;
             default: ShowToast(a + " not implemented yet"); break;
         }
     }

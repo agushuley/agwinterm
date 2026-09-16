@@ -230,6 +230,9 @@ internal partial class Program : ISessionHost, IWindowHost
         public AgentStatus? Dot;      // leading status dot (attention/sessions)
         public object? Data;          // e.g. the Theme for live-preview
         public Action? Run;           // null = non-actionable placeholder
+        public Func<bool>? Enabled;   // asked when the row is shown and again when it is run; false = dim and inert (menu + palette)
+        public bool Checked;          // a check mark in the menu gutter (File ▸ Open Window marks the open ones)
+        public Func<List<PalItem>>? Submenu;   // a flyout the row opens instead of running (menu rows)
     }
     private PaletteKind _palette = PaletteKind.None;
 
@@ -1028,6 +1031,7 @@ internal partial class Program : ISessionHost, IWindowHost
             rootKids.Add(nodes.Count);
             nodes.Add(new Uia.Node { Kind = Uia.NodeKind.ChromeButton, Index = ChromeUiaIdentity(btns[i].action), Name = btns[i].label, Parent = 0, Rect = btns[i].rect });
         }
+        AddMenuBarUiaNodes(nodes, rootKids);   // the title bar's menu bar, with its open dropdown (MenuBar.cs)
         nodes[0].Children = rootKids.ToArray();
         return new Uia.TreeSnapshot { Nodes = nodes.ToArray() };
     }
@@ -1045,7 +1049,10 @@ internal partial class Program : ISessionHost, IWindowHost
     {
         var list = new List<(string, string, UiaRect)>();
         foreach (var (x0, x1, action) in _titleButtons)
+        {
+            if (action.StartsWith(MenuIdPrefix, StringComparison.Ordinal)) continue;   // the bar's labels are MenuItems of the MenuBar element
             list.Add((action, ChromeButtonLabel(action), ScreenRect(x0, 0, x1 - x0, TitleBarH)));
+        }
         float fy = ClientH() - FooterH;
         foreach (var (x0, x1, action) in _footerButtons)
             list.Add((action, ChromeButtonLabel(action), ScreenRect(x0, fy, x1 - x0, FooterH)));
@@ -1080,6 +1087,7 @@ internal partial class Program : ISessionHost, IWindowHost
             var action = b.FirstOrDefault(button => ChromeUiaIdentity(button.action) == index).action;
             if (action is not null) ChromeAction(action);
         }
+        else if (kind == Uia.NodeKind.MenuItem) MenuUiaInvoke(index);
         else if (kind == Uia.NodeKind.SettingsControl && _setOpen)
         {
             var row = FocusableRows().FirstOrDefault(r => r.UiaIdentity == index);
@@ -1103,6 +1111,7 @@ internal partial class Program : ISessionHost, IWindowHost
         {
             case Uia.NodeKind.Terminal: ExitChromeFocus(announce: false); break;
             case Uia.NodeKind.Sidebar: EnterChromeFocus(); break;
+            case Uia.NodeKind.MenuItem: if (index < 100 && MenuBarUsable) FocusMenuBar(index); break;
             case Uia.NodeKind.SettingsControl:
                 var row = FocusableRows().FirstOrDefault(r => r.UiaIdentity == index);
                 if (_setOpen && row is not null) { _setNav = -1; _setFocus = row; _setFocusKb = true; AfterSetFocus(); }

@@ -38,7 +38,7 @@ internal partial interface IRawElementProviderFragmentRoot
 
 partial class Uia
 {
-    internal enum NodeKind { Root, Terminal, Sidebar, Session, ChromeButton, SettingsGroup, SettingsControl, SettingsTab, HelpDoc }
+    internal enum NodeKind { Root, Terminal, Sidebar, Session, ChromeButton, SettingsGroup, SettingsControl, SettingsTab, HelpDoc, MenuBar, MenuItem }
 
     /// <summary>One node in the accessibility tree snapshot (built by Program.BuildUiaTree).</summary>
     internal sealed class Node
@@ -47,12 +47,13 @@ partial class Uia
         public int Index;                 // session/row lifetime token or chrome action identity; fixed tab ordinal
         public string Name = "";
         public bool Focused, Selected;
+        public bool Enabled = true;       // false = a dim menu row: listed, not invokable
         public UiaRect Rect;              // screen px (all zero → fall back to the host/window rect)
         public int Parent = -1;          // index into TreeSnapshot.Nodes
         public int[] Children = Array.Empty<int>();
     }
 
-    private static bool IsButton(NodeKind k) => k is NodeKind.ChromeButton or NodeKind.SettingsControl or NodeKind.SettingsTab;
+    private static bool IsButton(NodeKind k) => k is NodeKind.ChromeButton or NodeKind.SettingsControl or NodeKind.SettingsTab or NodeKind.MenuItem;
 
     internal sealed class TreeSnapshot { public required Node[] Nodes; }   // Nodes[0] is the root
 
@@ -74,15 +75,27 @@ partial class Uia
     internal nint FragmentPtr(NodeKind kind, int index)
     {
         EnsureAlive();
-        object obj = kind switch
-        {
-            NodeKind.Root => new UiaRoot(this, _treeHwnd),
-            NodeKind.Terminal => new UiaTerminal(this),
-            _ when IsButton(kind) => new UiaButton(this, kind, index),
-            _ => new UiaFragment(this, kind, index),
-        };
-        return AsInterface(obj, IID_IRawElementProviderFragment);
+        return AsInterface(NodeObject(kind, index), IID_IRawElementProviderFragment);
     }
+
+    /// <summary>An IRawElementProviderSimple* (AddRef'd) for a node, or 0 — what the event-raising
+    /// APIs take. Handing them the FRAGMENT pointer instead made the core call the Simple vtable's
+    /// slots on the Fragment vtable (our Navigate answered get_ProviderOptions with a garbage
+    /// direction) and wedged the UI thread — seen the first time a keyboard-focusable element was
+    /// invoked with a client attached, since the core sets focus before it invokes.</summary>
+    internal nint ProviderPtr(NodeKind kind, int index)
+    {
+        EnsureAlive();
+        return AsInterface(NodeObject(kind, index), IID_IRawElementProviderSimple);
+    }
+
+    private object NodeObject(NodeKind kind, int index) => kind switch
+    {
+        NodeKind.Root => new UiaRoot(this, _treeHwnd),
+        NodeKind.Terminal => new UiaTerminal(this),
+        _ when IsButton(kind) => new UiaButton(this, kind, index),
+        _ => new UiaFragment(this, kind, index),
+    };
 
     internal Action<NodeKind, int>? OnInvoke;   // app activates a button/control when UIA invokes it
     internal static readonly Guid IID_IInvokeProvider = new("54fcb24b-e18e-47a2-b4d3-eccbe77599a2");
@@ -96,20 +109,20 @@ partial class Uia
     internal void RaiseFocus(NodeKind kind, int index)
     {
         if (_closed || _providerSimple == 0 || !ClientsListening) return;
-        nint frag = 0;
-        try { frag = FragmentPtr(kind, index); if (frag != 0) UiaRaiseAutomationEvent(frag, UIA_AutomationFocusChangedEventId); }
+        nint provider = 0;
+        try { provider = ProviderPtr(kind, index); if (provider != 0) UiaRaiseAutomationEvent(provider, UIA_AutomationFocusChangedEventId); }
         catch { }
-        finally { if (frag != 0) Marshal.Release(frag); }
+        finally { if (provider != 0) Marshal.Release(provider); }
     }
 
     private const int UIA_AutomationFocusChangedEventId = 20005;
 
     // UIA control-type ids + common property ids (shared by all fragments).
     internal const int CT_Pane = 50033, CT_Document = 50030, CT_List = 50008, CT_ListItem = 50007,
-        CT_Button = 50000, CT_Group = 50026, CT_TabItem = 50019;
+        CT_Button = 50000, CT_Group = 50026, CT_TabItem = 50019, CT_MenuBar = 50010, CT_MenuItem = 50011;
     internal const int P_ControlType = 30003, P_Name = 30005, P_LocalizedControlType = 30004,
         P_IsControlElement = 30016, P_IsContentElement = 30017, P_IsKeyboardFocusable = 30009,
-        P_HasKeyboardFocus = 30008;
+        P_HasKeyboardFocus = 30008, P_IsEnabled = 30010;
 }
 
 // ---- Fragment implementations ----
@@ -125,7 +138,7 @@ internal abstract class UiaNodeBase
     protected Uia.Node? Self(Uia.TreeSnapshot t)
     {
         var node = Uia.Find(t, Kind, Index);
-        if (node is null && Kind is Uia.NodeKind.Session or Uia.NodeKind.ChromeButton or Uia.NodeKind.SettingsControl or Uia.NodeKind.SettingsTab)
+        if (node is null && Kind is Uia.NodeKind.Session or Uia.NodeKind.ChromeButton or Uia.NodeKind.SettingsControl or Uia.NodeKind.SettingsTab or Uia.NodeKind.MenuItem)
             throw new COMException("The accessibility element is no longer available.", unchecked((int)0x80040201));
         return node;
     }
@@ -177,7 +190,7 @@ internal abstract class UiaNodeBase
         Owner.OnSetFocus?.Invoke(Kind, Index);
     }
 
-    internal bool KeyboardFocusable => Kind is Uia.NodeKind.Terminal or Uia.NodeKind.Sidebar or Uia.NodeKind.Session or Uia.NodeKind.SettingsControl or Uia.NodeKind.SettingsTab;
+    internal bool KeyboardFocusable => Kind is Uia.NodeKind.Terminal or Uia.NodeKind.Sidebar or Uia.NodeKind.Session or Uia.NodeKind.SettingsControl or Uia.NodeKind.SettingsTab or Uia.NodeKind.MenuItem;
 
     public nint GetFragmentRoot() => Owner.FragmentRootPtr();
 
@@ -193,6 +206,7 @@ internal abstract class UiaNodeBase
             Uia.P_IsKeyboardFocusable => KeyboardFocusable,
             Uia.P_IsContentElement => content,
             Uia.P_HasKeyboardFocus => n?.Focused == true,
+            Uia.P_IsEnabled => n?.Enabled != false,
             _ => null,
         };
         if (val is not null) Marshal.GetNativeVariantForObject(val, pRetVal);
@@ -274,6 +288,7 @@ internal partial class UiaFragment : UiaNodeBase, IRawElementProviderSimple, IRa
             Uia.NodeKind.Session => (Uia.CT_ListItem, "session", true),
             Uia.NodeKind.SettingsGroup => (Uia.CT_Group, "settings", false),
             Uia.NodeKind.HelpDoc => (Uia.CT_Document, "help", true),
+            Uia.NodeKind.MenuBar => (Uia.CT_MenuBar, "menu bar", false),
             _ => (Uia.CT_Pane, "group", false),
         };
         FillProperty(propertyId, pRetVal, ct, lct, content);
@@ -299,7 +314,8 @@ internal partial class UiaButton : UiaNodeBase, IRawElementProviderSimple, IRawE
     public void GetPropertyValue(int propertyId, nint pRetVal)
     {
         VariantInit(pRetVal);
-        var (ct, lct) = Kind == Uia.NodeKind.SettingsTab ? (Uia.CT_TabItem, "tab") : (Uia.CT_Button, "button");
+        var (ct, lct) = Kind == Uia.NodeKind.SettingsTab ? (Uia.CT_TabItem, "tab")
+            : Kind == Uia.NodeKind.MenuItem ? (Uia.CT_MenuItem, "menu item") : (Uia.CT_Button, "button");
         FillProperty(propertyId, pRetVal, ct, lct, true);
     }
     public void Invoke() { Self(Owner.Tree()); Owner.OnInvoke?.Invoke(Kind, Index); }

@@ -1169,13 +1169,16 @@ internal partial class Program
     private static string SessionSelectionText(Ses s) => SelectionText(s.ActivePane);
 
     /// <summary>Returns true if the key was consumed (matches the WinUI key table).</summary>
+    private bool _altContext;   // the current WM_SYSKEYDOWN's Alt context bit (set around OnKeyDown by the window procedure)
+
     private bool OnKeyDown(int vk)
     {
-        bool ctrl = KeyDown(VK_CONTROL), shift = KeyDown(VK_SHIFT), alt = KeyDown(VK_MENU);
+        bool ctrl = KeyDown(VK_CONTROL), shift = KeyDown(VK_SHIFT), alt = KeyDown(VK_MENU) || _altContext;
 
         // While the popup context menu is up it owns the keyboard (↑↓ Enter Esc; the popup window
         // never takes focus, so keys arrive here and are forwarded).
         if (_menuHwnd != IntPtr.Zero) return MenuKeyDown(vk);
+        if (_menuBarFocus >= 0) return MenuBarKey(vk);   // a bar label has the focus (Alt / F10): arrows, Enter, Esc
 
         // Keyboard mark mode (mouseless selection): arrows move the selection focus, Enter/Ctrl+C
         // copies, Esc exits. Owns the keyboard while active.
@@ -1291,6 +1294,10 @@ internal partial class Program
             // the terminal.
             if (action is not "close_cover" || _cover is not null || FocusedPaneWithOverlay() is not null) { RunAction(action); return true; }
         }
+
+        // F10 focuses the menu bar when nothing bound it — a keymap chord or the leader on F10 was
+        // dispatched above and never reaches here.
+        if (vk == 0x79 /* F10 */ && !ctrl && !alt && !shift && MenuBarUsable) { FocusMenuBar(0); return true; }
 
         if (_session is null) return false;
 

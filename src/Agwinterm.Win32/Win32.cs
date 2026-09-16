@@ -19,6 +19,8 @@ internal static class Win32
     public const uint WM_CHAR = 0x0102;
     public const uint WM_SYSKEYDOWN = 0x0104;
     public const uint WM_SYSKEYUP = 0x0105;
+    public const uint WM_SYSCOMMAND = 0x0112;
+    public const long SC_KEYMENU = 0xF100;   // the OS menu mode a lone Alt / F10 would enter
     public const uint WM_SYSCHAR = 0x0106;
     public const uint WM_TIMER = 0x0113;
     public const uint WM_MOUSEMOVE = 0x0200;
@@ -532,7 +534,7 @@ internal static class Win32
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
-    public const uint MB_YESNO = 0x4, MB_ICONQUESTION = 0x20;
+    public const uint MB_YESNO = 0x4, MB_ICONQUESTION = 0x20, MB_ICONINFORMATION = 0x40;
     public const int IDYES = 6;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
