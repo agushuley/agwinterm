@@ -531,32 +531,18 @@ internal partial class Program
         catch (Exception ex) { ShowToast("could not open " + Path.GetFileName(path) + ": " + ex.Message, 3000); }
     }
 
-    /// <summary>File ▸ Reload Config: re-read agwinterm.conf and apply, for every key whose value
-    /// differs from the value last APPLIED (<see cref="_appliedConfig"/>, not <c>_config</c>: a
-    /// <c>config set</c> in between re-read the file without applying the other keys), exactly what
-    /// a <c>config set</c> of that key applies (<see cref="ApplyConfigKeys"/>). The quick-terminal
-    /// hotkey is registered first, as <c>config set</c> does before its apply, because the OS can
-    /// refuse it: then the previous chord stays registered, the key stays out of the applied record
-    /// (the next reload tries again) while <c>config get</c> reports the file, and the refusal is in
-    /// the one toast this shows — with the steps' own notes, since a toast replaces the last.</summary>
+    /// <summary>File ▸ Reload Config: re-read agwinterm.conf and apply every key it changed, exactly
+    /// as a <c>config set</c> applies its key (<see cref="ReloadConfigApplying"/>), the file's
+    /// quick-terminal hotkey registered whenever it is not the registered one (so a refusal at
+    /// startup or by the last reload is retried). One toast, wrapped: the count, then every note the
+    /// steps produced (a refusal, a backend switch) on its own line — a toast has one slot, and a
+    /// later one would replace an earlier one before it was ever drawn.</summary>
     private void ReloadConfigFromDisk()
     {
-        var applied = _appliedConfig ?? ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
-        _config = TerminalConfig.Load(ConfigPath);
-        var changed = ConfigKeys.Where(k => ConfigValue(k) != applied[k]).ToList();
         var notes = new List<string>();
-        bool hotkeyRefused = false;
-        if (changed.Contains("quick-terminal-hotkey") && SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
-        {
-            notes.Add(hotkeyError);
-            changed.Remove("quick-terminal-hotkey");
-            hotkeyRefused = true;
-        }
-        ApplyConfigKeys(changed, notes);
-        _appliedConfig = ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
-        if (hotkeyRefused) _appliedConfig["quick-terminal-hotkey"] = applied["quick-terminal-hotkey"];
+        var changed = ReloadConfigApplying(null, notes, registerHotkey: true);
         string summary = changed.Count == 0 ? "agwinterm.conf reloaded — nothing changed" : $"agwinterm.conf reloaded — {changed.Count} setting(s) applied";
-        ShowToast(notes.Count == 0 ? summary : summary + " — " + string.Join("; ", notes), notes.Count == 0 ? 2500 : 7000);
+        ShowToast(notes.Count == 0 ? summary : summary + "\n" + string.Join("\n", notes), notes.Count == 0 ? 2500 : 7000);
     }
 
     private void ShowAbout()

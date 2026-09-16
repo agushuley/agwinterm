@@ -595,14 +595,21 @@ internal partial class Program
     {
         if (_toastText is null) return;
         int cw = ClientW(), ch = ClientH();
-        float tw = MeasureText(_toastText, _uiFont) + 32f, th = 34f;
+        // Wrapped inside the content area: a reload's toast carries every note of the keys it applied
+        // (a refused hotkey, a backend switch), and a single unbounded line ran off both edges.
+        float maxW = Math.Max(120f, (cw - _sidebarW) - 32f);
+        using var layout = _dwrite.CreateTextLayout(_toastText, _uiFont, Math.Max(1f, maxW - 32f), Math.Max(1f, ch - 48f));
+        layout.WordWrapping = WordWrapping.Wrap;
+        float tw = Math.Min(maxW, layout.Metrics.Width + 32f), th = Math.Max(34f, layout.Metrics.Height + 16f);
+        layout.MaxWidth = Math.Max(1f, tw - 32f); layout.MaxHeight = th;
+        layout.ParagraphAlignment = ParagraphAlignment.Center;
         float cx = _sidebarW + ((cw - _sidebarW) - tw) / 2f;
         float ty = ch - th - 24f;
         _toastRect = new Rect(cx, ty, tw, th);   // recorded for click-to-jump hit-testing
         brush.Color = Mix(ChromeBg, ChromeText, 0.14f);
         rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(cx, ty, tw, th), RadiusX = 8f, RadiusY = 8f }, brush);
         brush.Color = ChromeText;
-        rt.DrawText(_toastText, _uiFont, new Rect(cx + 16f, ty, tw - 24f, th), brush);
+        rt.DrawTextLayout(new System.Numerics.Vector2(cx + 16f, ty), layout, brush, DrawTextOptions.Clip);
     }
 
     /// <summary>While a leader sequence is pending, a small pill hint (bottom-left of the content region).</summary>
@@ -1042,30 +1049,46 @@ internal partial class Program
             if (SetQuickHotkey(value.Trim(), () => WriteConfigKey(key, value.Trim())) is { } error) return error;
         }
         else WriteConfigKey(key, value.Trim());
-        _appliedConfig ??= ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);   // everything in _config is applied up to here
-        _config = TerminalConfig.Load(ConfigPath);       // reparse so clamping/validation is centralized
-        ApplyConfigKeys(new[] { key });
-        _appliedConfig[key] = ConfigValue(key);
+        ReloadConfigApplying(key, notes: null, registerHotkey: false);   // reparse so clamping/validation is centralized; apply what changed
         bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
         return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
     }
 
+    /// <summary>Re-read agwinterm.conf into <see cref="_config"/> and apply every key whose value
+    /// changed, plus <paramref name="alwaysKey"/> — the key a <c>config set</c> just wrote, applied
+    /// even when its value reads the same. The file is the truth: a key edited by hand is applied by
+    /// the next set or reload, so <c>_config</c> never holds an unapplied value (the theme picker and
+    /// the prompt-engine writers update <c>_config</c> themselves as they apply, and a set of the
+    /// hotkey registers before it writes). With <paramref name="registerHotkey"/> the file's
+    /// quick-terminal hotkey is registered whenever it is not the registered chord — a no-op when it
+    /// is — so a chord refused earlier (at startup, or by the last reload) is tried again; a refusal
+    /// leaves the previous chord registered while <c>config get</c> reports the file, and is noted.
+    /// Returns the keys applied. Runs on the UI thread.</summary>
+    private List<string> ReloadConfigApplying(string? alwaysKey, List<string>? notes, bool registerHotkey)
+    {
+        var before = ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
+        _config = TerminalConfig.Load(ConfigPath);
+        var changed = ConfigKeys.Where(k => ConfigValue(k) != before[k]).ToList();
+        if (alwaysKey is not null && !changed.Contains(alwaysKey)) changed.Add(alwaysKey);
+        if (registerHotkey && SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
+        {
+            changed.Remove("quick-terminal-hotkey");
+            if (notes is null) ShowToast(hotkeyError, 4000); else notes.Add(hotkeyError);
+        }
+        ApplyConfigKeys(changed, notes);
+        return changed;
+    }
+
     /// <summary>The live effects of <paramref name="keys"/> having changed in <see cref="_config"/>:
     /// the per-key steps (a backend, a core, the blink timer, the quick size, a regrid, a font) and
-    /// the unconditional refresh. <c>config set</c> calls it with its one key; File ▸ Reload Config
-    /// with every key the reload changed — one list of steps, so a reload cannot fall short of a set
-    /// (the quick-terminal hotkey is the one step outside it: its registration can be refused, so the
-    /// callers run it first and report). A step's note (the backend and core switches announce
-    /// themselves) is toasted, or collected into <paramref name="notes"/> when the caller has a
-    /// toast of its own to fold it into — the toast has one slot, and a later one replaces an
-    /// earlier one before it is ever drawn. Runs on the UI thread.</summary>
-    /// <summary>Every config key's value as last APPLIED — not as last loaded: <c>config set</c>
-    /// re-reads the whole file into <see cref="_config"/> and applies its one key, so a key edited by
-    /// hand since sits in <c>_config</c> unapplied. File ▸ Reload Config diffs against this, so that
-    /// edit is applied then. Null until the first set or reload: everything loaded at startup was
-    /// applied at startup.</summary>
-    private static Dictionary<string, string>? _appliedConfig;
-
+    /// the unconditional refresh. Both <c>config set</c> and File ▸ Reload Config reach it through
+    /// <see cref="ReloadConfigApplying"/> with every key the file changed — one list of steps, so a
+    /// reload cannot fall short of a set (the quick-terminal hotkey is the one step outside it: its
+    /// registration can be refused, so the callers run it first and report). A step's note (the
+    /// backend and core switches announce themselves) is toasted, or collected into
+    /// <paramref name="notes"/> when the caller has a toast of its own to fold it into — the toast
+    /// has one slot, and a later one replaces an earlier one before it is ever drawn. Runs on the UI
+    /// thread.</summary>
     private void ApplyConfigKeys(IReadOnlyCollection<string> keys, List<string>? notes = null)
     {
         bool Has(string k) => keys.Contains(k);

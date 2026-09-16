@@ -24,6 +24,7 @@ public static class MenuBarNative {
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h,IntPtr dc,uint flags);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out RECT r);
  [StructLayout(LayoutKind.Sequential)] public struct RECT{public int left,top,right,bottom;}
+ public static IntPtr[] Dialogs(uint pid){var found=new List<IntPtr>();EnumWindows((h,p)=>{uint n;GetWindowThreadProcessId(h,out n);if(n==pid&&IsWindowVisible(h)){var cls=new StringBuilder(256);GetClassNameW(h,cls,256);if(cls.ToString()=="#32770")found.Add(h);}return true;},IntPtr.Zero);return found.ToArray();}
  public static IntPtr[] Popups(uint pid){var found=new List<IntPtr>();EnumWindows((h,p)=>{uint n;GetWindowThreadProcessId(h,out n);if(n==pid&&IsWindowVisible(h)){var cls=new StringBuilder(256);GetClassNameW(h,cls,256);if(cls.ToString()=="agwinterm-menu")found.Add(h);}return true;},IntPtr.Zero);return found.ToArray();}
 }
 '@ }
@@ -144,6 +145,39 @@ AltKey 0x48
 Check 'Alt+H runs the keymap''s binding (toggle_sidebar), not the Help menu' ((MenuWait {([string](Rpc 'sidebar' @{op='state'} -NoTarget))-ne $sidebarBefore}) -and @(Rows 'Help').Count-eq 0) "before=$sidebarBefore"
 AltKey 0x48
 Check 'and toggles it back' (MenuWait {([string](Rpc 'sidebar' @{op='state'} -NoTarget))-eq $sidebarBefore})
+
+# ---- A row that runs a modal loop: Help ▸ About (a MessageBox) pumps the queued WM_CHAR of the Enter that ran it
+# while the menu is already closed; the char is the menu's and must not reach the pane. Keyboard all the way:
+# Alt, Right×3 to Help, Enter opens it, End selects About (its last row), Enter runs it.
+$paneBefore=([string](Rpc 'session.text' @{})).TrimEnd()
+AltTap; Key $VK_RIGHT; Key $VK_RIGHT; Key $VK_RIGHT
+Check 'Help is focused after three Rights' (MenuWait {Focused 'Help'})
+Key $VK_RETURN
+Check 'Enter opens the Help menu' (MenuWait {$null-ne (Row 'Help' 'About agwinterm')})
+Key 0x23   # End
+PostKey $WM_KEYDOWN $VK_RETURN 0x001C0001; PostKey 0x102 0x0D 0x001C0001; PostKey $WM_KEYUP $VK_RETURN 0xC01C0001   # Enter, with the WM_CHAR TranslateMessage would queue
+Check 'Enter on About opens the About dialog' (MenuWait {@([MenuBarNative]::Dialogs($job.Pid)).Count-eq 1})
+foreach($dlg in @([MenuBarNative]::Dialogs($job.Pid))){ [void][MenuBarNative]::PostMessageW($dlg,0x10,[IntPtr]::Zero,[IntPtr]::Zero) }   # WM_CLOSE
+Check 'the About dialog closes' (MenuWait {@([MenuBarNative]::Dialogs($job.Pid)).Count-eq 0 -and @(Rows 'Help').Count-eq 0})
+Start-Sleep -Milliseconds 300
+$paneAfter=([string](Rpc 'session.text' @{})).TrimEnd()
+Check 'the Enter that ran About did not reach the pane' ($paneAfter-eq $paneBefore) "before=…$($paneBefore.Substring([Math]::Max(0,$paneBefore.Length-40))) after=…$($paneAfter.Substring([Math]::Max(0,$paneAfter.Length-40)))"
+
+# ---- The file is the truth: a key edited by hand in agwinterm.conf is applied by the next `config set` of ANOTHER
+# key (it re-reads the file), and by File ▸ Reload Config — with the same steps a set applies (the cell grows).
+$conf=Join-Path $appDir 'agwinterm.conf'
+function Set-ConfLine([string]$key,[string]$value){ $kept=@(Get-Content $conf | Where-Object { $_ -notmatch ('^\s*'+[regex]::Escape($key)+'\s*=') }); Set-Content $conf ($kept + ($key+' = '+$value)) }   # one line per key: the parser keeps the FIRST
+$fontBefore=[regex]::Match([string](Rpc 'config.get' @{key='font-size'} -NoTarget),'(\d+(\.\d+)?)\s*$').Groups[1].Value
+$cellBefore=[double](Rpc 'session.metrics' @{} $session).cellHeight
+Set-ConfLine 'font-size' ([string]([double]$fontBefore + 6))
+$null=Rpc 'config.set' @{key='cursor-blink-ms';value='700'} -NoTarget
+Check 'a hand-edited key is applied by a config set of another key' (MenuWait {([double](Rpc 'session.metrics' @{} $session).cellHeight)-gt $cellBefore}) "cell=$((Rpc 'session.metrics' @{} $session).cellHeight) before=$cellBefore font=$(Rpc 'config.get' @{key='font-size'} -NoTarget)"
+Set-ConfLine 'font-size' $fontBefore
+Invoke-Element (BarLabel 'File')
+Check 'File opens for Reload Config' (MenuWait {$null-ne (Row 'File' 'Reload Config')})
+Invoke-Element (Row 'File' 'Reload Config')
+Check 'Reload Config applies the hand edit: the cell is back to its size' (MenuWait {([double](Rpc 'session.metrics' @{} $session).cellHeight)-eq $cellBefore}) "cell=$((Rpc 'session.metrics' @{} $session).cellHeight) before=$cellBefore"
+Check 'and config get reads the reloaded value' (([string](Rpc 'config.get' @{key='font-size'} -NoTarget))-match ('(^|\D)'+[regex]::Escape($fontBefore)+'\s*$')) "get=$(Rpc 'config.get' @{key='font-size'} -NoTarget)"
 
 # ---- show-menu-bar: off removes the bar and its keys; on brings it back.
 $null=Rpc 'config.set' @{key='show-menu-bar';value='false'} -NoTarget
