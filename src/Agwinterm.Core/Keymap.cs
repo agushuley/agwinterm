@@ -241,7 +241,7 @@ public static class Keymap
     }
 
     /// <summary>Whether <paramref name="action"/> is a built-in action id a keymap can bind.</summary>
-    public static bool IsBuiltinAction(string action) => ValidActions.Contains(action);
+    internal static bool IsBuiltinAction(string action) => ValidActions.Contains(action);
 
     /// <summary>A canonical chord as people write it — <c>ctrl+shift+t</c> → <c>Ctrl+Shift+T</c>,
     /// <c>ctrl+backtick</c> → <c>Ctrl+`</c> — for menu rows, palette hints and help.</summary>

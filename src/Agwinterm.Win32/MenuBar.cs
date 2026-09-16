@@ -15,8 +15,8 @@ namespace Agwinterm.Win32;
 /// is the title bar this app already draws, so the bar lives there and takes the Windows keyboard
 /// model: a lone Alt tap or F10 focuses it (←/→ move, ↓/Enter open, Esc leaves), Alt+F / V / N / H
 /// open a menu directly, and inside an open menu ←/→ switch menus. A keymap.conf binding on an
-/// Alt+letter chord wins over the mnemonic (the keymap dispatch runs first), so a shell that wants
-/// Alt+F keeps it by binding it.
+/// Alt+letter chord wins over the mnemonic — <see cref="MenuBarMnemonic"/> checks the bindings and
+/// a pending leader before it opens anything — so a shell that wants Alt+F keeps it by binding it.
 ///
 /// <para>Every row shows its EFFECTIVE shortcut (a rebind shows the rebind), a row whose enablement
 /// term is false is dim and inert, and a state row's label follows the state (Hide/Show Sidebar).
@@ -30,6 +30,7 @@ internal partial class Program
     private int _menuBarOpen = -1;                                // the menu whose dropdown is up (Menu.cs level 0), -1 none
     private int _menuBarFocus = -1;                               // the label holding keyboard focus with no dropdown (Alt / F10), -1 none
     private bool _altArmed;                                       // Alt went down and nothing else has since: its release focuses the bar
+    private bool _menuAteChar;                                    // the last key-down was the menu's: its WM_CHAR is dropped, once
     private bool _menuByKeyboard;                                 // the open dropdown came from the keyboard (its first row is preselected)
     private readonly List<(float x0, float x1, int menu)> _menuBarLabels = new();   // label hit-boxes (DIPs), rebuilt each paint
     private Rect _menuBarRect;                                    // the bar's box (DIPs) for the UIA MenuBar element
@@ -37,6 +38,17 @@ internal partial class Program
     private static readonly object WindowRenameMarker = new();    // _editing's value while the title bar's rename field is up
 
     private bool MenuBarShown => _config.ShowMenuBar && !ToolbarHidden && !_isQuickWindow;
+
+    /// <summary>The menu Alt+<paramref name="vk"/> opens, or -1. Letters only: the virtual-key codes of
+    /// Numpad 6 / 8 / Decimal and F7 are the ASCII codes of f / h / n / v, and casting them to a char
+    /// opened menus from an Alt-code entry and from Alt+F7.</summary>
+    private static int MnemonicMenu(int vk) => vk is >= 0x41 and <= 0x5A ? MenuModel.MenuForMnemonic((char)vk) : -1;
+
+    /// <summary>Keys whose key-down is followed by a WM_CHAR: the ones a consumed menu key must eat
+    /// the char of. Arrows and function keys make none, and eating a later char for them would lose
+    /// a keystroke.</summary>
+    private static bool KeyMakesChar(int vk) => vk is VK_SPACE or VK_RETURN or VK_ESCAPE or VK_BACK or VK_TAB
+        or (>= 0x30 and <= 0x5A) or (>= 0x60 and <= 0x6F) or (>= 0xBA and <= 0xE2);
     /// <summary>The bar takes input only while nothing modal owns the keyboard: Settings, Help, a
     /// palette, the native picker and an inline rename all do; the dashboard does not (its items
     /// still act on the tree behind it, as the keyboard's do).</summary>
@@ -122,6 +134,7 @@ internal partial class Program
     private void FocusMenuBar(int menu)
     {
         if (!MenuBarShown) return;
+        if (_menuLevels.Count > 0) CloseMenuWindow();   // focus on a label is the state WITHOUT a dropdown
         _menuBarFocus = Math.Clamp(menu, 0, MenuModel.Menus.Count - 1);
         if (Uia.ClientsListening) _uia.Announce("Menu bar. " + MenuModel.Menus[_menuBarFocus].Title);
         _uia.RaiseFocus(Uia.NodeKind.MenuItem, _menuBarFocus);
@@ -148,7 +161,7 @@ internal partial class Program
             case VK_DOWN: case VK_RETURN: case VK_SPACE: OpenMenuBar(_menuBarFocus, keyboard: true); return true;
             case VK_ESCAPE: case 0x79 /* F10 */: case VK_MENU: LeaveMenuBar(); return true;
             default:
-                if (MenuModel.MenuForMnemonic((char)vk) is >= 0 and var mn) { OpenMenuBar(mn, keyboard: true); return true; }
+                if (MnemonicMenu(vk) is >= 0 and var mn) { OpenMenuBar(mn, keyboard: true); return true; }
                 if (Keymap.IsModifierKey(vk)) return true;
                 LeaveMenuBar();
                 return true;
@@ -156,23 +169,34 @@ internal partial class Program
     }
 
     /// <summary>Alt+letter with the context bit set (a real or a posted WM_SYSKEYDOWN): open that
-    /// menu, unless keymap.conf bound the chord — then the keymap dispatch owns it and this returns
-    /// false. Called from the window procedure, where the lParam context bit is, rather than from
-    /// OnKeyDown, whose Alt comes from GetKeyState and is blind to posted input.</summary>
+    /// menu — unless the chord is the user's: bound in keymap.conf, the leader chord itself, a leader
+    /// follow-up, or any key while a leader sequence is pending. Then this returns false and the
+    /// ordinary dispatch runs. Called from the window procedure, where the lParam context bit is,
+    /// rather than from OnKeyDown, whose Alt comes from GetKeyState and is blind to posted input.</summary>
     private bool MenuBarMnemonic(int vk)
     {
-        if (!MenuBarUsable || KeyDown(VK_CONTROL) || KeyDown(VK_SHIFT)) return false;
-        int menu = MenuModel.MenuForMnemonic((char)vk);
+        if (!MenuBarUsable || KeyDown(VK_CONTROL) || KeyDown(VK_SHIFT) || _leaderPending) return false;
+        int menu = MnemonicMenu(vk);
         if (menu < 0) return false;
-        if (Keymap.ChordFor(vk, ctrl: false, alt: true, shift: false) is { } chord && (_keymap.ContainsKey(chord) || _leader == chord)) return false;
+        if (Keymap.ChordFor(vk, ctrl: false, alt: true, shift: false) is { } chord
+            && (_keymap.ContainsKey(chord) || _leader == chord || _leaderBindings.ContainsKey(chord))) return false;
         OpenMenuBar(menu, keyboard: true);   // closes an open dropdown first, so this is also how a menu switches
         return true;
     }
 
     // ---- UIA ----
 
+    // A row's UIA identity names the MENU it belongs to (and, for a flyout row, the parent row), so an
+    // element a client kept from File does not resolve to the same row of View after a switch:
+    //   label:       menu                         (0..3)
+    //   row:         100 + menu*100 + row         (100..499)
+    //   flyout row:  10000 + (menu*100 + parentRow)*100 + row
+    private static int MenuRowUiaIndex(int menu, int row) => 100 + menu * 100 + row;
+    private static int MenuFlyoutUiaIndex(int menu, int parentRow, int row) => 10000 + (menu * 100 + parentRow) * 100 + row;
+    private int MenuRowUiaIndex(MenuLevel lv, int row) => lv.ParentRow < 0 ? MenuRowUiaIndex(_menuBarOpen, row) : MenuFlyoutUiaIndex(_menuBarOpen, lv.ParentRow, row);
+
     /// <summary>The bar as a UIA MenuBar of MenuItems — the labels, and under the open one its rows
-    /// (index 100 + row; a flyout's rows 200 + row, under their parent row). Invoke opens or runs.</summary>
+    /// (indices above; a flyout's rows under their parent row). Invoke opens or runs.</summary>
     private void AddMenuBarUiaNodes(List<Uia.Node> nodes, List<int> rootKids)
     {
         if (_menuBarLabels.Count == 0) return;
@@ -185,12 +209,12 @@ internal partial class Program
             int label = nodes.Count;
             kids.Add(label);
             nodes.Add(new Uia.Node { Kind = Uia.NodeKind.MenuItem, Index = menu, Name = MenuModel.Menus[menu].Title, Parent = bar, Focused = _menuBarFocus == menu, Rect = ScreenRect(x0, 0, x1 - x0, TitleBarH) });
-            if (menu == _menuBarOpen && _menuLevels.Count > 0) nodes[label].Children = MenuLevelUiaNodes(nodes, _menuLevels[0], label, 100).ToArray();
+            if (menu == _menuBarOpen && _menuLevels.Count > 0) nodes[label].Children = MenuLevelUiaNodes(nodes, _menuLevels[0], label).ToArray();
         }
         nodes[bar].Children = kids.ToArray();
     }
 
-    private List<int> MenuLevelUiaNodes(List<Uia.Node> nodes, MenuLevel lv, int parent, int baseIndex)
+    private List<int> MenuLevelUiaNodes(List<Uia.Node> nodes, MenuLevel lv, int parent)
     {
         var kids = new List<int>();
         for (int i = 0; i < lv.Items.Count; i++)
@@ -202,13 +226,13 @@ internal partial class Program
             float top = MenuRowTop(lv, i);
             nodes.Add(new Uia.Node
             {
-                Kind = Uia.NodeKind.MenuItem, Index = baseIndex + i, Name = it.Label, Parent = parent,
-                Enabled = MenuActionable(it),
+                Kind = Uia.NodeKind.MenuItem, Index = MenuRowUiaIndex(lv, i), Name = it.Label, Parent = parent,
+                Enabled = MenuActionable(it), Accelerator = it.Hint,
                 Focused = lv.Sel == i && ReferenceEquals(lv, _menuLevels[^1]),
                 Rect = new UiaRect { Left = lv.X, Top = lv.Y + top * Scale, Width = lv.W * Scale, Height = MenuRowH * Scale },
             });
             if (it.Submenu is not null && _menuLevels.Count > 1 && ReferenceEquals(lv, _menuLevels[0]) && _menuLevels[1].ParentRow == i)
-                nodes[node].Children = MenuLevelUiaNodes(nodes, _menuLevels[1], node, 200).ToArray();
+                nodes[node].Children = MenuLevelUiaNodes(nodes, _menuLevels[1], node).ToArray();
         }
         return kids;
     }
@@ -222,8 +246,10 @@ internal partial class Program
             if (_menuBarOpen == index) CloseMenuWindow(); else OpenMenuBar(index);
             return;
         }
-        int level = index >= 200 ? 1 : 0, row = index >= 200 ? index - 200 : index - 100;
-        if (level >= _menuLevels.Count) return;
+        int level, row, menu;
+        if (index < 10000) { level = 0; menu = (index - 100) / 100; row = (index - 100) % 100; }
+        else { int x = index - 10000; level = 1; menu = x / 10000; row = x % 100; if ((x / 100) % 100 != (_menuLevels.Count > 1 ? _menuLevels[1].ParentRow : -1)) return; }
+        if (menu != _menuBarOpen || level >= _menuLevels.Count) return;   // an element kept from another menu, or from a closed one
         var lv = _menuLevels[level];
         if (row < 0 || row >= lv.Items.Count || !MenuActionable(lv.Items[row])) return;
         lv.Sel = row;
@@ -336,6 +362,7 @@ internal partial class Program
             case "workspace": return CurrentWorkspace() is not null;
             case "workspaces": lock (_workspaces) return _workspaces.Count > 1;
             case "windows": lock (_windowIndex) return _windowIndex.Count > 1;
+            case "openwindows": lock (_windowIndex) return _windowIndex.Count(m => m.IsOpen && _byId.ContainsKey(m.Id)) > 1;
             case "closed": return _closedSessions.Count > 0 || _closedWorkspaces.Count > 0;
             case "tree": return _sidebarMode == SidebarMode.Tree;
             case "flags": return _sidebarMode == SidebarMode.Flagged || AllSessions().Any(s => s.Flagged);
@@ -489,7 +516,7 @@ internal partial class Program
         if (_active is null) return;
         string cwd = PaneCwd(_active.ActivePane);
         if (cwd.Length == 0 || !Directory.Exists(cwd)) { ShowToast("no directory to reveal"); return; }
-        ShellExecuteW(IntPtr.Zero, "open", "explorer.exe", "\"" + cwd + "\"", null, SW_SHOW);
+        ShellExecuteW(IntPtr.Zero, "open", "explorer.exe", "/select,\"" + cwd + "\"", null, SW_SHOW);   // the directory selected in its parent, as agterm's Reveal does
     }
 
     /// <summary>Edit Keymap… / Edit agwinterm.conf…: the file in whatever the shell associates with
@@ -504,22 +531,19 @@ internal partial class Program
         catch (Exception ex) { ShowToast("could not open " + Path.GetFileName(path) + ": " + ex.Message, 3000); }
     }
 
-    /// <summary>File ▸ Reload Config: re-read agwinterm.conf and apply what a single
-    /// <c>config set</c> applies, for every key at once.</summary>
+    /// <summary>File ▸ Reload Config: re-read agwinterm.conf and apply, for every key whose value
+    /// changed, exactly what a <c>config set</c> of that key applies (<see cref="ApplyConfigKeys"/>).
+    /// The quick-terminal hotkey is registered first, as <c>config set</c> does before its apply,
+    /// because the OS can refuse it; a refusal is shown and the file keeps the value.</summary>
     private void ReloadConfigFromDisk()
     {
+        var before = ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
         _config = TerminalConfig.Load(ConfigPath);
-        _theme = FindTheme(_config.Theme);
-        ApplySystemTheme();
-        RecomputeChrome();
-        ApplyWindowOpacity();
-        if (_active is not null) RegridSession(_active);
-        if (_cover is not null) RegridCover();
-        RebuildFont();
-        RebuildSidebarFonts();
-        RefreshSettingsControls();
-        RequestRedraw();
-        ShowToast("agwinterm.conf reloaded");
+        var changed = ConfigKeys.Where(k => ConfigValue(k) != before[k]).ToList();
+        if (changed.Contains("quick-terminal-hotkey") && SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
+            ShowToast(hotkeyError, 4000);
+        ApplyConfigKeys(changed);
+        ShowToast(changed.Count == 0 ? "agwinterm.conf reloaded — nothing changed" : $"agwinterm.conf reloaded — {changed.Count} setting(s) applied", 2500);
     }
 
     private void ShowAbout()

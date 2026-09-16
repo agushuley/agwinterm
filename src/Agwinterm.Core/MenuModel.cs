@@ -33,7 +33,8 @@ public sealed record MenuDef(string Title, char Mnemonic, IReadOnlyList<MenuItem
 ///
 /// <para>Enablement terms, evaluated by the host when a menu opens: <c>session</c> (an active
 /// session), <c>workspace</c> (a current workspace), <c>workspaces</c> (more than one workspace),
-/// <c>windows</c> (more than one window in the library), <c>closed</c> (something recently closed),
+/// <c>windows</c> (more than one window in the library), <c>openwindows</c> (more than one window
+/// OPEN — stepping goes between open windows), <c>closed</c> (something recently closed),
 /// <c>tree</c> (the sidebar in tree mode), <c>flags</c> (flagged mode, or a flagged session to
 /// show), <c>anyflag</c> (a flagged session), <c>split</c> (the active session has two panes),
 /// <c>status</c> (the active session's agent status is not idle), <c>sessions</c> (at least two
@@ -110,8 +111,8 @@ public static class MenuModel
             new MenuItemDef("last_session", "Last Session", Term: "sessions"),
             new MenuItemDef("previous_workspace", "Previous Workspace", "previous_workspace", Term: "workspaces"),
             new MenuItemDef("next_workspace", "Next Workspace", "next_workspace", Term: "workspaces"),
-            new MenuItemDef("previous_window", "Previous Window", Term: "windows"),
-            new MenuItemDef("next_window", "Next Window", Term: "windows"),
+            new MenuItemDef("previous_window", "Previous Window", Term: "openwindows"),
+            new MenuItemDef("next_window", "Next Window", Term: "openwindows"),
             MenuItemDef.Separator,
             new MenuItemDef("focus_left", "Focus Left Pane", "focus_left_pane", AltLabel: "Focus Top Pane", Term: "split"),
             new MenuItemDef("focus_right", "Focus Right Pane", "focus_right_pane", AltLabel: "Focus Bottom Pane", Term: "split"),

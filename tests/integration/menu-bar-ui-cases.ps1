@@ -1,12 +1,14 @@
-# Menu bar (MenuBar.cs): the title bar's File / View / Navigate / Help, driven through UI Automation
+﻿# Menu bar (MenuBar.cs): the title bar's File / View / Navigate / Help, driven through UI Automation
 # and posted keys against hud-ui's private instance — never global input. Dot-sourced by hud-ui.ps1
 # (-Suite Menu): $hwnd, $job, Rpc, Check, Node, Shot and $artifact come from there, and the sandbox's
 # keymap.conf carries `map alt+h = toggle_sidebar` so the keymap-wins rule has something to win with.
 #
 # The UIA client sees what a screen reader sees: a MenuBar of MenuItems, the open menu's rows under
-# its label (disabled rows listed but not enabled), and the keyboard focus a lone Alt tap gives the
-# bar. What this cannot exercise is the mouse path through the popup's capture (a click inside the
-# dropdown) — that is the sidebar context menu's existing path, unchanged in kind.
+# its label (disabled rows listed but not enabled, the chord as AcceleratorKey), and the keyboard
+# focus a lone Alt tap gives the bar. The popup's mouse routing (Menu.cs, rewritten for the bar:
+# every message routed by its screen point) is driven by posting a button message to the popup
+# window itself; a press that lands INSIDE a row is not posted, so a row running from a click is
+# covered by Invoke instead.
 $uiaAssemblies=if($PSVersionTable.PSEdition-eq 'Core'){$PSHOME}else{"$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/WPF"}
 Add-Type -Path "$uiaAssemblies/UIAutomationTypes.dll"
 Add-Type -Path "$uiaAssemblies/UIAutomationClient.dll"
@@ -70,11 +72,19 @@ Check 'the File menu lists agterm''s rows in agterm''s order' (($fileRows -join 
 Check 'Delete Window is listed but disabled with one window' ($null-ne (Row 'File' 'Delete Window') -and -not (Row 'File' 'Delete Window').Current.IsEnabled)
 Check 'Open Recent is disabled with nothing closed' ($null-ne (Row 'File' 'Open Recent') -and -not (Row 'File' 'Open Recent').Current.IsEnabled)
 Check 'New Session is enabled' ((Row 'File' 'New Session').Current.IsEnabled)
-Check 'Close Session shows its effective chord' ((Row 'File' 'Close Session').Current.Name-eq 'Close Session')
+Check 'New Session shows its default chord as the accelerator' ((Row 'File' 'New Session').Current.AcceleratorKey-eq 'Ctrl+Shift+T') "acc=$((Row 'File' 'New Session').Current.AcceleratorKey)"
+Check 'a row without a chord has no accelerator' ([string]::IsNullOrEmpty((Row 'File' 'Open Directory…').Current.AcceleratorKey))
 $popups=@([MenuBarNative]::Popups($job.Pid))
 Check 'the dropdown is a real popup window of the owned process' ($popups.Count-eq 1) "popups=$($popups.Count)"
 if($popups.Count-eq 1){ ShotWindow $popups[0] 'file-menu' }
 [void](Shot 'menu-bar-file-open')
+# A posted press outside the popup (negative client coordinates: what a captured press outside looks like) closes it and touches nothing.
+$treeBefore=(Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress
+[void][MenuBarNative]::PostMessageW($popups[0],0x201,[IntPtr]1,[IntPtr](([int64](-40 -band 0xFFFF) -shl 16) -bor (-40 -band 0xFFFF)))
+Check 'a press outside the popup closes it' (MenuWait {@(Rows 'File').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0})
+Check 'and changes nothing in the tree' (((Rpc 'tree')|ConvertTo-Json -Depth 8 -Compress)-eq $treeBefore)
+Invoke-Element (BarLabel 'File')
+Check 'File opens again for the Invoke case' (MenuWait {@(Rows 'File').Count-gt 0})
 $before=@((Rpc 'tree').workspaces|ForEach-Object sessions).Count
 Invoke-Element (Row 'File' 'New Session')
 Check 'Invoke on New Session creates a session and closes the menu' ((MenuWait {@((Rpc 'tree').workspaces|ForEach-Object sessions).Count-eq $before+1}) -and (MenuWait {@(Rows 'File').Count-eq 0}))
@@ -93,10 +103,31 @@ Key $VK_ESCAPE
 Check 'Esc closes the dropdown and keeps View focused' ((MenuWait {@(Rows 'View').Count-eq 0}) -and (Focused 'View'))
 Key $VK_ESCAPE
 Check 'a second Esc leaves the bar' (MenuWait {-not (Focused 'View') -and -not (Focused 'File')})
+AltTap
+Check 'Alt tap: the bar is focused' (MenuWait {Focused 'File'})
+AltTap
+Check 'Alt tap again: the bar is left (the same tap cannot re-focus it)' (MenuWait {-not (Focused 'File')})
+Start-Sleep -Milliseconds 300
+Check 'and it stays left' (-not (Focused 'File'))
+AltTap
+Check 'bar focused for the key-leak case' (MenuWait {Focused 'File'})
+PostKey $WM_KEYDOWN 0x51 0x00100001; PostKey 0x102 0x71 0x00100001; PostKey $WM_KEYUP 0x51 0xC0100001   # q, as TranslateMessage would queue it
+Check 'a non-mnemonic key leaves the bar' (MenuWait {-not (Focused 'File')})
+Start-Sleep -Milliseconds 400
+$paneText=[string](Rpc 'session.text' @{})   # the ACTIVE pane: New Session above made a second one
+Check 'and its character does not reach the pane' (-not ($paneText-match '>q')) "tail=$($paneText.Trim() -replace '\s+',' ' | ForEach-Object { $_.Substring([Math]::Max(0,$_.Length-80)) })"
 
 # ---- Mnemonics: Alt+V opens View directly; Alt+H is bound in keymap.conf, so the keymap wins.
 AltKey 0x56
 Check 'Alt+V opens the View menu directly' (MenuWait {$null-ne (Row 'View' 'Increase Font Size')})
+Check 'a rebound action shows its keymap chord as the accelerator' ((Row 'View' 'Hide Sidebar').Current.AcceleratorKey-eq 'Alt+H') "acc=$((Row 'View' 'Hide Sidebar').Current.AcceleratorKey)"
+AltTap
+Check 'Alt while a menu is open closes it and leaves the bar' (MenuWait {@(Rows 'View').Count-eq 0 -and -not (Focused 'View') -and -not (Focused 'File')})
+AltKey 0x66
+Start-Sleep -Milliseconds 400
+Check 'Alt+Numpad6 is not Alt+F: no menu opens' (@(Rows 'File').Count-eq 0 -and @([MenuBarNative]::Popups($job.Pid)).Count-eq 0)
+AltKey 0x56
+Check 'View opens again' (MenuWait {$null-ne (Row 'View' 'Increase Font Size')})
 Key $VK_ESCAPE; Key $VK_ESCAPE
 Check 'the View menu is closed again' (MenuWait {@(Rows 'View').Count-eq 0 -and -not (Focused 'View')})
 $sidebarBefore=[string](Rpc 'sidebar' @{op='state'} -NoTarget)
@@ -110,7 +141,8 @@ $null=Rpc 'config.set' @{key='show-menu-bar';value='false'} -NoTarget
 Check 'show-menu-bar = false removes the MenuBar element' (MenuWait {$null-eq (MenuBar)})
 AltTap
 Start-Sleep -Milliseconds 300
-Check 'a lone Alt tap focuses nothing while the bar is hidden' ($null-eq (MenuBar))
+PostKey $WM_KEYDOWN 0x58 0x002D0001; PostKey 0x102 0x78 0x002D0001; PostKey $WM_KEYUP 0x58 0xC02D0001   # x
+Check 'with the bar hidden an Alt tap takes no keys: the next key reaches the pane' (MenuWait {([string](Rpc 'session.text' @{}))-match '>\S*x'})   # \S*: the Alt+Numpad6 case above left the pane its Alt+6 (ESC 6), as a real one would "tail=$(([string](Rpc 'session.text' @{})).Trim() -replace '\s+',' ' | ForEach-Object { $_.Substring([Math]::Max(0,$_.Length-80)) })"
 $null=Rpc 'config.set' @{key='show-menu-bar';value='true'} -NoTarget
 Check 'show-menu-bar = true brings it back' (MenuWait {$null-ne (MenuBar)})
 Check 'config get reads the key' (([string](Rpc 'config.get' @{key='show-menu-bar'} -NoTarget))-match 'true')

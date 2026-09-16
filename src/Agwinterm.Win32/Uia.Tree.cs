@@ -48,6 +48,7 @@ partial class Uia
         public string Name = "";
         public bool Focused, Selected;
         public bool Enabled = true;       // false = a dim menu row: listed, not invokable
+        public string Accelerator = "";   // a menu row's shortcut as shown (AcceleratorKey)
         public UiaRect Rect;              // screen px (all zero → fall back to the host/window rect)
         public int Parent = -1;          // index into TreeSnapshot.Nodes
         public int[] Children = Array.Empty<int>();
@@ -122,7 +123,7 @@ partial class Uia
         CT_Button = 50000, CT_Group = 50026, CT_TabItem = 50019, CT_MenuBar = 50010, CT_MenuItem = 50011;
     internal const int P_ControlType = 30003, P_Name = 30005, P_LocalizedControlType = 30004,
         P_IsControlElement = 30016, P_IsContentElement = 30017, P_IsKeyboardFocusable = 30009,
-        P_HasKeyboardFocus = 30008, P_IsEnabled = 30010;
+        P_HasKeyboardFocus = 30008, P_IsEnabled = 30010, P_AcceleratorKey = 30006;
 }
 
 // ---- Fragment implementations ----
@@ -207,6 +208,7 @@ internal abstract class UiaNodeBase
             Uia.P_IsContentElement => content,
             Uia.P_HasKeyboardFocus => n?.Focused == true,
             Uia.P_IsEnabled => n?.Enabled != false,
+            Uia.P_AcceleratorKey => n?.Accelerator is { Length: > 0 } acc ? acc : null,
             _ => null,
         };
         if (val is not null) Marshal.GetNativeVariantForObject(val, pRetVal);

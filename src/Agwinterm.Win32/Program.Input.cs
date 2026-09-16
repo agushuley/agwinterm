@@ -1168,15 +1168,16 @@ internal partial class Program
     /// <summary>Selection text of the target session's active pane (for the control API).</summary>
     private static string SessionSelectionText(Ses s) => SelectionText(s.ActivePane);
 
-    /// <summary>Returns true if the key was consumed (matches the WinUI key table).</summary>
     private bool _altContext;   // the current WM_SYSKEYDOWN's Alt context bit (set around OnKeyDown by the window procedure)
 
+    /// <summary>Returns true if the key was consumed (matches the WinUI key table).</summary>
     private bool OnKeyDown(int vk)
     {
         bool ctrl = KeyDown(VK_CONTROL), shift = KeyDown(VK_SHIFT), alt = KeyDown(VK_MENU) || _altContext;
 
-        // While the popup context menu is up it owns the keyboard (↑↓ Enter Esc; the popup window
-        // never takes focus, so keys arrive here and are forwarded).
+        // While a popup menu is up — the sidebar's context menu or a menu-bar dropdown — it owns the
+        // keyboard (↑↓ Home End Enter Space Esc, ←→ between bar menus or out of a flyout, Alt+letter;
+        // the popup window never takes focus, so keys arrive here and are forwarded).
         if (_menuHwnd != IntPtr.Zero) return MenuKeyDown(vk);
         if (_menuBarFocus >= 0) return MenuBarKey(vk);   // a bar label has the focus (Alt / F10): arrows, Enter, Esc
 
@@ -1296,8 +1297,12 @@ internal partial class Program
         }
 
         // F10 focuses the menu bar when nothing bound it — a keymap chord or the leader on F10 was
-        // dispatched above and never reaches here.
-        if (vk == 0x79 /* F10 */ && !ctrl && !alt && !shift && MenuBarUsable) { FocusMenuBar(0); return true; }
+        // dispatched above and never reaches here — and when the pane is not a full-screen program:
+        // one on the alternate screen or reporting the mouse (mc, htop, far, nano) gets its F10, as
+        // it does in Windows Terminal; the Alt tap and Alt+letter still reach the bar there.
+        if (vk == 0x79 /* F10 */ && !ctrl && !alt && !shift && MenuBarUsable
+            && ActiveSurface()?.S.Emulator is not ({ IsAltScreen: true } or { MouseReporting: true }))
+        { FocusMenuBar(0); return true; }
 
         if (_session is null) return false;
 

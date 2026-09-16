@@ -180,7 +180,9 @@ internal partial class Program
         while (_menuLevels.Count > 0) DestroyMenuLevel(_menuLevels[^1]);
         if (held) ReleaseCapture();
         _menuClosing = false;
-        if (_menuBarOpen >= 0) { _menuBarOpen = -1; RequestRedraw(); }   // the bar's label stops showing as open
+        // The bar's label stops showing as open, and its keyboard focus goes with the menu: a caller
+        // that wants the bar focused after the close (Esc) re-focuses it explicitly.
+        if (_menuBarOpen >= 0 || _menuBarFocus >= 0) { _menuBarOpen = -1; _menuBarFocus = -1; RequestRedraw(); }
     }
 
     /// <summary>Top of row <paramref name="i"/> within a level, in DIPs from the window's top.</summary>
@@ -217,7 +219,7 @@ internal partial class Program
         return null;
     }
 
-    private static void MenuMoveSel(MenuLevel lv, int dir)
+    private void MenuMoveSel(MenuLevel lv, int dir)
     {
         int n = lv.Items.Count, i = lv.Sel;
         for (int step = 0; step < n; step++)
@@ -225,10 +227,10 @@ internal partial class Program
             i = ((i + dir) % n + n) % n;
             if (MenuActionable(lv.Items[i])) { lv.Sel = i; break; }
         }
-        InvalidateRect(lv.Hwnd, IntPtr.Zero, false);
+        MenuSelChanged(lv);
     }
 
-    private static void MenuSelectEdge(MenuLevel lv, bool first)
+    private void MenuSelectEdge(MenuLevel lv, bool first)
     {
         int n = lv.Items.Count;
         for (int k = 0; k < n; k++)
@@ -236,7 +238,16 @@ internal partial class Program
             int i = first ? k : n - 1 - k;
             if (MenuActionable(lv.Items[i])) { lv.Sel = i; break; }
         }
+        MenuSelChanged(lv);
+    }
+
+    /// <summary>A level's selection moved: repaint it, and tell a screen reader which row Enter
+    /// would now run — the rows are UIA MenuItems (MenuBar.cs), and a reader follows focus events,
+    /// not the Focused property.</summary>
+    private void MenuSelChanged(MenuLevel lv)
+    {
         InvalidateRect(lv.Hwnd, IntPtr.Zero, false);
+        if (_menuBarOpen >= 0 && lv.Sel >= 0 && Uia.ClientsListening) _uia.RaiseFocus(Uia.NodeKind.MenuItem, MenuRowUiaIndex(lv, lv.Sel));
     }
 
     /// <summary>Run the selected row of the top level: a flyout row opens its flyout (first row
@@ -265,10 +276,11 @@ internal partial class Program
         if (_menuLevels.Count == 0) return false;
         var top = _menuLevels[^1];
         bool inFlyout = _menuLevels.Count > 1;
-        if (KeyDown(VK_MENU) && _menuBarOpen >= 0 && Agwinterm.Core.MenuModel.MenuForMnemonic((char)vk) is >= 0 and var mn)
+        if ((KeyDown(VK_MENU) || _altContext) && _menuBarOpen >= 0 && MnemonicMenu(vk) is >= 0 and var mn)
         { OpenMenuBar(mn, keyboard: true); return true; }
         switch (vk)
         {
+            case VK_MENU: CloseMenuWindow(); return true;   // Alt while a menu is up closes it, as a native menu does
             case VK_ESCAPE:
                 if (inFlyout) CloseMenuFlyout();
                 else
@@ -353,7 +365,7 @@ internal partial class Program
         {
             int i = MenuIndexAt(hit.lv, hit.x, hit.y);
             if (i != hit.lv.Sel && (i >= 0 || !ReferenceEquals(hit.lv, _menuLevels[0]) || _menuLevels.Count == 1))
-            { hit.lv.Sel = i; InvalidateRect(hit.lv.Hwnd, IntPtr.Zero, false); }
+            { hit.lv.Sel = i; MenuSelChanged(hit.lv); }
             if (ReferenceEquals(hit.lv, _menuLevels[0]))
             {
                 if (i >= 0 && hit.lv.Items[i].Submenu is not null) OpenMenuFlyout(i);
@@ -392,6 +404,14 @@ internal partial class Program
         run();
     }
 
+    private static POINT MenuScreenPoint(IntPtr hwnd, IntPtr lParam)
+    {
+        long l = (long)lParam;
+        var p = new POINT { x = unchecked((short)(l & 0xFFFF)), y = unchecked((short)((l >> 16) & 0xFFFF)) };
+        ClientToScreen(hwnd, ref p);
+        return p;
+    }
+
     private static IntPtr MenuProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         if (!_menuByHwnd.TryGetValue(hwnd, out var self)) return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -406,13 +426,14 @@ internal partial class Program
                     EndPaint(hwnd, ref ps);
                     return IntPtr.Zero;
                 }
-            // Mouse messages carry client coordinates of THIS window and can be negative under
-            // capture; the pointer's screen position is what every level and the bar are compared
-            // against, so it is read once here.
-            case WM_MOUSEMOVE: { GetCursorPos(out POINT sp); self.MenuHover(sp); return IntPtr.Zero; }
+            // Mouse messages carry client coordinates of THIS window, negative under capture when
+            // the pointer is outside it; the screen point is what every level and the bar are
+            // compared against. Taken from the message (not GetCursorPos), so a posted message is
+            // routed exactly like a real one.
+            case WM_MOUSEMOVE: self.MenuHover(MenuScreenPoint(hwnd, lParam)); return IntPtr.Zero;
             case WM_LBUTTONDOWN:
-            case WM_RBUTTONDOWN: { GetCursorPos(out POINT sp); self.MenuPress(sp); return IntPtr.Zero; }
-            case WM_LBUTTONUP: { GetCursorPos(out POINT sp); self.MenuRelease(sp); return IntPtr.Zero; }
+            case WM_RBUTTONDOWN: self.MenuPress(MenuScreenPoint(hwnd, lParam)); return IntPtr.Zero;
+            case WM_LBUTTONUP: self.MenuRelease(MenuScreenPoint(hwnd, lParam)); return IntPtr.Zero;
             case WM_CAPTURECHANGED:
                 if (!self._menuClosing && self._menuLevels.Count > 0 && hwnd == self._menuLevels[0].Hwnd) self.CloseMenuWindow();   // capture stolen (alt-tab, other app) — dismiss
                 return IntPtr.Zero;

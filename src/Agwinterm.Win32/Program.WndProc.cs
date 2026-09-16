@@ -298,11 +298,19 @@ internal partial class Program
                 // Menu bar (MenuBar.cs): a lone Alt tap focuses it, so Alt going down arms it and any
                 // other key disarms it; Alt+letter with the context bit set is a mnemonic — read here,
                 // off lParam, so a posted key counts as much as a typed one.
-                if ((int)wParam == VK_MENU) { if (msg == WM_SYSKEYDOWN && ((long)lParam & 0x40000000) == 0) _altArmed = MenuBarUsable; }
+                _menuAteChar = false;   // a fresh key-down: whatever the last one ate is history
+                if ((int)wParam == VK_MENU)
+                {
+                    // Armed only while neither the bar nor a menu has the keyboard: with the bar focused
+                    // the key-down itself leaves it (MenuBarKey) and with a menu open it closes it
+                    // (MenuKeyDown), and arming here too made the same tap's key-up focus the bar again.
+                    if (msg == WM_SYSKEYDOWN && ((long)lParam & 0x40000000) == 0)
+                        _altArmed = MenuBarUsable && _menuBarFocus < 0 && _menuLevels.Count == 0;
+                }
                 else
                 {
                     _altArmed = false;
-                    if (msg == WM_SYSKEYDOWN && ((long)lParam & 0x20000000) != 0 && MenuBarMnemonic((int)wParam)) return IntPtr.Zero;
+                    if (msg == WM_SYSKEYDOWN && ((long)lParam & 0x20000000) != 0 && MenuBarMnemonic((int)wParam)) { _menuAteChar = true; return IntPtr.Zero; }
                 }
                 if (_dragging && (int)wParam == VK_ESCAPE)
                 {
@@ -313,7 +321,19 @@ internal partial class Program
                 // chord: a key that was queued or posted arrives after Alt is up, and the bit is what
                 // was true when it was pressed.
                 _altContext = msg == WM_SYSKEYDOWN && ((long)lParam & 0x20000000) != 0;
-                try { if (OnKeyDown((int)wParam)) return IntPtr.Zero; }
+                bool menuHadKeys = _menuLevels.Count > 0 || _menuBarFocus >= 0;
+                try
+                {
+                    if (OnKeyDown((int)wParam))
+                    {
+                        // TranslateMessage queued this key's WM_CHAR BEFORE the key-down ran, so a check of
+                        // the menu state when the char arrives is a check of what the key-down left
+                        // behind: a Space that ran a row would then reach the pane or a palette. The
+                        // key-down that the menu consumed eats its own char, once.
+                        if (menuHadKeys && KeyMakesChar((int)wParam)) _menuAteChar = true;
+                        return IntPtr.Zero;
+                    }
+                }
                 finally { _altContext = false; }
                 break;
 
@@ -326,7 +346,7 @@ internal partial class Program
                     // A lone Alt tap: the bar takes the keyboard focus (or gives it back), and the tap
                     // never reaches DefWindowProc's SC_KEYMENU.
                     _altArmed = false;
-                    if (_menuBarFocus >= 0) LeaveMenuBar(); else if (MenuBarUsable) FocusMenuBar(0);
+                    if (MenuBarUsable) FocusMenuBar(0);
                     return IntPtr.Zero;
                 }
                 if (msg == WM_SYSKEYUP) break;
@@ -361,7 +381,7 @@ internal partial class Program
                 {
                     char c = (char)wParam;
                     if (_kittyAteChar) { _kittyAteChar = false; return IntPtr.Zero; }   // OnKeyDown already CSI-u-encoded this key
-                    if (_menuLevels.Count > 0 || _menuBarFocus >= 0) return IntPtr.Zero;   // the menu owns the keyboard; a mnemonic letter is not text
+                    if (_menuAteChar || _menuLevels.Count > 0 || _menuBarFocus >= 0) { _menuAteChar = false; return IntPtr.Zero; }   // the menu's key-down made this char (MenuBar.cs)
                     if (CloseExitedOverlayOnKey()) return IntPtr.Zero;   // the any-key close of an exited --wait overlay (cover, else the focused pane's — P5)
                     if (_setOpen)
                     {

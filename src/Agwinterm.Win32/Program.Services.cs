@@ -1043,10 +1043,24 @@ internal partial class Program
         }
         else WriteConfigKey(key, value.Trim());
         _config = TerminalConfig.Load(ConfigPath);       // reparse so clamping/validation is centralized
-        if (key == "quick-terminal-size" && _quickHost?._quickVisible == true) _quickHost.PositionQuick();
-        if (key == "theme") _theme = FindTheme(_config.Theme);
-        if (key is "theme" or "theme-follow-system" or "theme-dark" or "theme-light") ApplySystemTheme();
-        if (key == "session-host")
+        ApplyConfigKeys(new[] { key });
+        bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
+        return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
+    }
+
+    /// <summary>The live effects of <paramref name="keys"/> having changed in <see cref="_config"/>:
+    /// the per-key steps (a backend, a core, the blink timer, the quick size, a regrid, a font) and
+    /// the unconditional refresh. <c>config set</c> calls it with its one key; File ▸ Reload Config
+    /// with every key the reload changed — one list of steps, so a reload cannot fall short of a set
+    /// (the quick-terminal hotkey is the one step outside it: its registration can be refused, so the
+    /// callers run it first and report). Runs on the UI thread.</summary>
+    private void ApplyConfigKeys(IReadOnlyCollection<string> keys)
+    {
+        bool Has(string k) => keys.Contains(k);
+        if (Has("quick-terminal-size") && _quickHost?._quickVisible == true) _quickHost.PositionQuick();
+        if (Has("theme")) _theme = FindTheme(_config.Theme);
+        if (Has("theme") || Has("theme-follow-system") || Has("theme-dark") || Has("theme-light")) ApplySystemTheme();
+        if (Has("session-host"))
         {
             // Live switch (#105 2d): NEW sessions use the chosen backend immediately; existing panes
             // keep the one they were born with (both kinds coexist fine) and converge on restart.
@@ -1058,7 +1072,7 @@ internal partial class Program
                 _ => "in-process mode — new sessions run in the window process; restart agwinterm to convert existing ones",
             }, 6000);
         }
-        if (key == "emulator-core")
+        if (Has("emulator-core"))
         {
             // Live switch, same semantics as session-host: NEW sessions get the chosen core;
             // existing panes keep the one they were born with and converge on restart.
@@ -1066,19 +1080,17 @@ internal partial class Program
             ShowToast(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator", 6000);
             _emulatorCoreNote = null;   // startup path only announces once
         }
-        if (key == "cursor-blink-ms")
+        if (Has("cursor-blink-ms"))
             foreach (var window in _registry.Values.ToArray())
                 if (window._hwnd != IntPtr.Zero) SetTimer(window._hwnd, (IntPtr)1, (uint)_config.CursorBlinkMs, IntPtr.Zero);
         RecomputeChrome();
         ApplyWindowOpacity();
-        if (key is "compact-toolbar" or "toolbar-mode")   // title-bar height changed → reflow the terminal grid
+        if (Has("compact-toolbar") || Has("toolbar-mode"))   // title-bar height changed → reflow the terminal grid
         { if (_active is not null) RegridSession(_active); if (_cover is not null) RegridCover(); }
-        if (key is "font-family" or "font-size") RebuildFont();   // apply live to the running window
-        if (key == "sidebar-font-size") RebuildSidebarFonts();    // apply the new sidebar name size live
+        if (Has("font-family") || Has("font-size")) RebuildFont();   // apply live to the running window
+        if (Has("sidebar-font-size")) RebuildSidebarFonts();         // apply the new sidebar name size live
         RequestRedraw();
         RefreshSettingsControls();                        // keep an open Settings window in sync
-        bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
-        return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
     }
 
     /// <summary>
