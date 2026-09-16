@@ -1,7 +1,7 @@
 # Dedicated P13 fixture: private app-data, no clipboard/registry writes, exact owned job teardown.
 param([string]$Exe="$PSScriptRoot/../../src/Agwinterm.Win32/bin/x64/Release/net10.0-windows/win-x64/Agwinterm.Win32.exe",
       [string]$TokenOwner=$env:AGWINTERM_TEST_OWNER,[switch]$Strict,
-      [ValidateSet('Hud','Quick','Navigation','Picker','Accessibility','Command')][string]$Suite='Hud')
+      [ValidateSet('Hud','Quick','Navigation','Picker','Accessibility','Command','Menu')][string]$Suite='Hud')
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -140,6 +140,9 @@ public sealed class HudOwnedJob {
         @('map f7 = toggle_search','map f8 = command:QuickProbe',
           ('command [send] QuickProbe = echo {AGW_PANE}>"'+(Join-Path $artifact 'keymap-send.txt')+'"'))|Add-Content (Join-Path $appDir 'keymap.conf')
     }
+    if($Suite-eq 'Menu'){
+        'map alt+h = toggle_sidebar'|Add-Content (Join-Path $appDir 'keymap.conf')   # a bound Alt+letter must win over the Help mnemonic
+    }
     if($Suite-eq 'Navigation'){
         @('map f5 | f7 = next_workspace','map f6 = next_workspace',
           'map f3 = delete_workspace','map f4 = action_palette','map f8 = previous_workspace','map f9 = toggle_workspace_collapse',
@@ -212,6 +215,7 @@ public sealed class HudOwnedJob {
         Check 'shared command acceptance completed' ($commandChecks-ge 30)
     }
     elseif($Suite-eq 'Picker') { . "$PSScriptRoot/picker-ui-cases.ps1" }
+    elseif($Suite-eq 'Menu') { . "$PSScriptRoot/menu-bar-ui-cases.ps1" }
     elseif($Suite-eq 'Navigation') { . "$PSScriptRoot/navigation-ui-cases.ps1" }
     elseif($Suite-eq 'Quick') { . "$PSScriptRoot/quick-ui-cases.ps1" } else {
     $ctl=Join-Path $root 'src/Agwinterm.Ctl/bin/Release/net10.0-windows/agwintermctl.exe'
