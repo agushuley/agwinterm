@@ -1403,18 +1403,37 @@ internal partial class Program
         RequestRedraw();
     }
 
-    /// <summary>Confirm a user-initiated session close (Yes/No), unless confirm-close-session is off.</summary>
-    private bool ConfirmCloseOk()
-        => !_config.ConfirmCloseSession
-           || MessageBoxW(_hwnd, "Close this session and end what's running in it?", "Close session",
-                          MB_YESNO | MB_ICONQUESTION) == IDYES;
+    private static bool SessionHasLiveShell(Ses ses) => ses.Panes.Any(p => !p.S.HasExited);
+
+    /// <summary>Confirm a UI close of one live session, showing a background target before asking.</summary>
+    private bool ConfirmCloseOk(Ses ses)
+    {
+        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, SessionHasLiveShell(ses))) return true;
+        Ses? prior = _active;
+        bool switched = !ReferenceEquals(prior, ses);
+        if (switched) SetActive(ses);
+        bool confirmed = MessageBoxW(_hwnd, "Close this session and end what's running in it?", "Close session",
+                                     MB_YESNO | MB_ICONQUESTION) == IDYES;
+        if (switched && prior is not null && AllSessions().Contains(prior)) SetActive(prior);
+        return confirmed;
+    }
+
+    /// <summary>Confirm an atomic batch close. A lone live target receives the normal visible-session prompt.</summary>
+    private bool ConfirmCloseOk(IReadOnlyCollection<Ses> sessions)
+    {
+        var live = sessions.Where(SessionHasLiveShell).ToList();
+        if (live.Count == 0 || _config.ConfirmCloseSession == "false") return true;
+        if (live.Count == 1) return ConfirmCloseOk(live[0]);
+        return MessageBoxW(_hwnd, "Close these sessions and end what's running in them?", "Close sessions",
+                           MB_YESNO | MB_ICONQUESTION) == IDYES;
+    }
 
     /// <summary>Close the focused pane; if it's the last pane, close the whole session.</summary>
     private void CloseActivePane()
     {
         var ses = _active;
         if (ses is null) return;
-        if (ses.Panes.Count <= 1) { if (ConfirmCloseOk()) CloseSessionInternal(ses); return; }
+        if (ses.Panes.Count <= 1) { if (ConfirmCloseOk(ses)) CloseSessionInternal(ses); return; }
         ClosePane(ses, ses.ActivePane);
     }
 
@@ -1460,8 +1479,8 @@ internal partial class Program
         EmitEvent("tree");   // control-API event log (#273): the node lost its split block
     }
 
-    /// <summary>A pane's shell process exited: if it was one side of a split, collapse to the survivor
-    /// (promote it into the main pane). Single-pane sessions keep the exited shell visible. (agterm #121.)</summary>
+    /// <summary>A pane's shell process exited: split panes collapse to their survivor; the configured
+    /// single-pane path closes the session without adding it to the reopen history.</summary>
     private void OnPaneProcessExited(Pane p)
     {
         if (_isQuickWindow && ReferenceEquals(p, _quick))
@@ -1471,7 +1490,12 @@ internal partial class Program
         }
         Ses? ses;
         lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(p));
-        if (ses is null || ses.Panes.Count <= 1) return;   // not a live split pane → leave the shell as-is
+        if (ses is null) return;
+        if (ses.Panes.Count <= 1)
+        {
+            if (_config.AutoCloseSessionOnExit) CloseSessionInternal(ses, captureForReopen: false);
+            return;
+        }
         ClosePane(ses, p);
     }
 
@@ -1653,9 +1677,9 @@ internal partial class Program
         EvictWatermark(ses.BgPath); SweepBackground(ses.Id); // drop the session's watermark file + texture
     }
 
-    private void CloseSessionInternal(Ses ses)
+    private void CloseSessionInternal(Ses ses, bool captureForReopen = true)
     {
-        CaptureClosedSession(ses);   // remember it so Reopen Closed Session can bring it back
+        if (captureForReopen) CaptureClosedSession(ses);   // remember a manual/API close for Reopen Closed Session
         bool wasActive = ReferenceEquals(_active, ses);
         DisposeSessionResources(ses);
         EmitEvent("tree");   // control-API event log (#273)

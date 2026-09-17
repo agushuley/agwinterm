@@ -933,7 +933,7 @@ internal partial class Program
         "scrollback-lines", "inactive-pane-dim", "unfocused-dim", "builtin-glyphs", "ligatures", "window-opacity", "sidebar-tint", "sidebar-font-size", "scroll-speed",
         "new-session-dir", "right-click-paste", "copy-on-select", "copy-on-ctrl-c", "word-delimiters", "desktop-notifications", "shell-integration",
         "restore-commands", "restore-buffer", "blocked-sound", "notification-sound", "omp-theme", "omp-integration", "prompt-engine", "starship-theme",
-        "new-session-dir-mode", "confirm-close-session", "compact-toolbar", "toolbar-mode", "notification-badges", "workspace-add-button",
+        "new-session-dir-mode", "confirm-close-session", "auto-close-session-on-exit", "compact-toolbar", "toolbar-mode", "notification-badges", "workspace-add-button",
         "show-scratch-button", "show-split-button", "show-dashboard-button", "show-quick-button", "show-menu-bar",
         "quick-terminal-size", "quick-terminal-hotkey",
         "attention-button", "status-color-active", "status-color-blocked", "status-color-completed",
@@ -1004,7 +1004,8 @@ internal partial class Program
         "prompt-engine" => _config.PromptEngine,
         "starship-theme" => _config.StarshipTheme,
         "new-session-dir-mode" => _config.NewSessionDirMode,
-        "confirm-close-session" => _config.ConfirmCloseSession ? "true" : "false",
+        "confirm-close-session" => _config.ConfirmCloseSession,
+        "auto-close-session-on-exit" => _config.AutoCloseSessionOnExit ? "true" : "false",
         "compact-toolbar" => _config.CompactToolbar ? "true" : "false",
         "toolbar-mode" => ToolbarModeResolved,
         "notification-badges" => _config.NotificationBadges ? "true" : "false",
@@ -1042,6 +1043,10 @@ internal partial class Program
             return "error: cursor-blink must be a boolean";
         if (key == "cursor-blink-ms" && (!int.TryParse(value.Trim(), out int blinkMs) || blinkMs <= 0))
             return "error: cursor-blink-ms must be a positive integer";
+        if (key == "confirm-close-session" && !TerminalConfig.IsConfirmCloseSessionMode(value.Trim()))
+            return "error: confirm-close-session must be false, interactive or true";
+        if (key == "auto-close-session-on-exit" && value.Trim().ToLowerInvariant() is not ("true" or "false" or "on" or "off" or "yes" or "no" or "1" or "0"))
+            return "error: auto-close-session-on-exit must be a boolean";
         if (key == "quick-terminal-size" && (!int.TryParse(value.Trim(), out int qs) || qs is < 40 or > 90))
             return "error: quick-terminal-size must be an integer from 40 through 90";
         if (key == "quick-terminal-hotkey")
