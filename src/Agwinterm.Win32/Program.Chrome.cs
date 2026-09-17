@@ -444,7 +444,7 @@ internal partial class Program
             if (sel.Any(x => AggStatus(x) != AgentStatus.Idle))
                 A($"Clear Status of {n}", "", () => { foreach (var x in sel) foreach (var p in x.Panes) p.S.SetStatus(AgentStatus.Idle); RequestRedraw(); });
             list.Add(MenuSeparator());
-            A($"Close {n} Sessions", "", () => { if (ConfirmCloseOk()) { foreach (var x in sel) CloseSessionInternal(x); ClearSelection(); } });
+            A($"Close {n} Sessions", "", () => { if (ConfirmCloseOk(sel)) { foreach (var x in sel) CloseSessionInternal(x); ClearSelection(); } });
             return list;
         }
         if (item is Ses ses)
@@ -463,7 +463,7 @@ internal partial class Program
             foreach (var t in targets) A($"Move to — {t.Name}", "", () => MoveSession(ses, t));
             if (AggStatus(ses) != AgentStatus.Idle) A("Clear Status", "", () => { foreach (var p in ses.Panes) p.S.SetStatus(AgentStatus.Idle); RequestRedraw(); });
             list.Add(MenuSeparator());
-            A("Close Session", "", () => { if (ConfirmCloseOk()) CloseSessionInternal(ses); });
+            A("Close Session", "", () => { if (ConfirmCloseOk(ses)) CloseSessionInternal(ses); });
         }
         else if (item is Workspace cws)
         {

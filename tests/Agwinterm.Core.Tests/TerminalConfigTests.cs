@@ -28,6 +28,31 @@ public class TerminalConfigTests
         Assert.True(on.ClipboardWrite);
     }
 
+    [Theory]
+    [InlineData("", "false")]
+    [InlineData("confirm-close-session = interactive", "interactive")]
+    [InlineData("confirm-close-session = TRUE", "true")]
+    [InlineData("confirm-close-session = unknown", "false")]
+    public void CloseSessionPolicyParsesKnownModes(string text, string expected)
+        => Assert.Equal(expected, TerminalConfig.Parse(text).ConfirmCloseSession);
+
+    [Fact]
+    public void CloseSessionPolicyOnlyConfirmsLiveShells()
+    {
+        Assert.False(TerminalConfig.ShouldConfirmCloseSession("false", true));
+        Assert.False(TerminalConfig.ShouldConfirmCloseSession("true", false));
+        Assert.True(TerminalConfig.ShouldConfirmCloseSession("interactive", true));
+        Assert.True(TerminalConfig.ShouldConfirmCloseSession("true", true));
+    }
+
+    [Fact]
+    public void AutoCloseSessionOnExitParsesAndIsDocumented()
+    {
+        Assert.False(TerminalConfig.Parse("").AutoCloseSessionOnExit);
+        Assert.True(TerminalConfig.Parse("auto-close-session-on-exit = true").AutoCloseSessionOnExit);
+        Assert.Contains("auto-close-session-on-exit", TerminalConfig.DefaultText);
+    }
+
     [Fact]
     public void Template_DocumentsClipboardPolicyKeys()
     {
