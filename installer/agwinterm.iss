@@ -2,9 +2,9 @@
 ; Build via installer\build.ps1 (publishes to stage\ then runs ISCC on this file).
 
 #define AppName    "agwinterm"
-; Fork/local releases: <upstream-version>-ah.<n> (artifact names + ping/updater). Reset n to 1 on each new upstream base.
+; Fork releases: AppVersion = <upstream-version>-ah.<incremental>. Reset incremental to 1 on each new upstream base.
 #define AppVersion "0.20.0-ah.2"
-; PE file version: four numeric fields; the fourth is the ah build index (here 2).
+; VersionInfoVersion: fourth field = -ah incremental (here 2). VersionInfoTextVersion shows the full AppVersion.
 #define VersionInfoVersion "0.20.0.2"
 #define AppExe     "Agwinterm.Win32.exe"
 #define AppPublisher "Boris Kudriashov"
