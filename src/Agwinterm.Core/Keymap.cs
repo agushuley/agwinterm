@@ -142,6 +142,11 @@ public static class Keymap
         public readonly Dictionary<string, string> LeaderBindings = new(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>Whether an explicit session-cycle binding should use the Ctrl+Tab MRU walk.</summary>
+    public static bool UsesMruTabWalk(IReadOnlyDictionary<string, string> bindings, string chord)
+        => bindings.TryGetValue(chord, out var action)
+           && action is "next_session" or "previous_session";
+
     /// <summary>Parse keymap text; starts from the defaults, then applies map/command/leader lines.</summary>
     public static Parsed Parse(string text)
     {

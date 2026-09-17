@@ -66,6 +66,15 @@ public class NavigationTests
     }
 
     [Theory]
+    [InlineData("", "ctrl+tab", true)]
+    [InlineData("", "ctrl+shift+tab", true)]
+    [InlineData("unmap ctrl+tab", "ctrl+tab", false)]
+    [InlineData("unmap ctrl+shift+tab", "ctrl+shift+tab", false)]
+    [InlineData("map ctrl+tab = toggle_sidebar", "ctrl+tab", false)]
+    public void MruTabWalkRequiresAnExplicitSessionCycleBinding(string config, string chord, bool expected)
+        => Assert.Equal(expected, Keymap.UsesMruTabWalk(Keymap.Parse(config).Bindings, chord));
+
+    [Theory]
     [InlineData("ctrl+insert", "ctrl+insert")]
     [InlineData("ctrl+ins", "ctrl+insert")]
     [InlineData("shift+insert", "shift+insert")]
