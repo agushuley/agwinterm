@@ -3,9 +3,9 @@
 
 #define AppName    "agwinterm"
 ; Fork/local releases: <upstream-version>-ah.<n> (artifact names + ping/updater). Reset n to 1 on each new upstream base.
-#define AppVersion "0.20.0-ah.1"
-; PE file version: four numeric fields; the fourth is the ah build index (here 1).
-#define VersionInfoVersion "0.20.0.1"
+#define AppVersion "0.20.0-ah.2"
+; PE file version: four numeric fields; the fourth is the ah build index (here 2).
+#define VersionInfoVersion "0.20.0.2"
 #define AppExe     "Agwinterm.Win32.exe"
 #define AppPublisher "Boris Kudriashov"
 ; The main app defaults new sessions to the Rust pty-host as a first-run seed only (it never
