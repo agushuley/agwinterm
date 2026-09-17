@@ -52,6 +52,8 @@ internal partial class Program
         var lines = new List<string>
         {
             "GETTING STARTED",
+            $"Version: {_termProgramVersion}",
+            "",
             "agwinterm is an agent-first terminal: sessions live in the left sidebar,",
             "each with a status dot an agent can set via the control API (agwintermctl).",
             "",
@@ -105,7 +107,7 @@ internal partial class Program
         rt.DrawRoundedRectangle(new RoundedRectangle { Rect = _helpCard, RadiusX = 10f, RadiusY = 10f }, brush, 1f);
 
         brush.Color = ChromeText;
-        rt.DrawText("Help", _uiFont, new Rect(cx + 20f, cy + 12f, 200f, 24f), brush);
+        rt.DrawText($"Help · agwinterm {_termProgramVersion}", _uiFont, new Rect(cx + 20f, cy + 12f, cardW - 270f, 24f), brush);
         brush.Color = ChromeDim;
         rt.DrawText("Esc to close · ↑↓ scroll", _uiSmall, new Rect(cx + cardW - 220f, cy + 15f, 170f, 20f), brush);
         // Close (×) button, same treatment as the Settings card.
