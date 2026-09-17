@@ -38,3 +38,14 @@ if (-not (Test-Path $exe)) { throw "publish produced no Agwinterm.Win32.exe" }
 $dst = Join-Path $outDir "agwinterm-portable-$ver-win-x64.exe"
 Copy-Item $exe $dst -Force
 Write-Host ("== done: {0} ({1:N1} MB) ==" -f $dst, ((Get-Item $dst).Length/1MB)) -ForegroundColor Green
+
+# A local release is also made available at the shared workspace level. CI keeps its release
+# artifacts under installer\Output, so it must not create an untracked workspace copy.
+if (-not $env:GITHUB_ACTIONS) {
+  $releasesDir = Join-Path (Split-Path -Parent $root) "releases"
+  $localArtifact = Join-Path $releasesDir (Split-Path -Leaf $dst)
+  if (Test-Path $localArtifact) { throw "local release artifact already exists: $localArtifact" }
+  New-Item -ItemType Directory -Force $releasesDir | Out-Null
+  Copy-Item $dst $localArtifact
+  Write-Host ("== local release: {0} ==" -f $localArtifact) -ForegroundColor Green
+}
