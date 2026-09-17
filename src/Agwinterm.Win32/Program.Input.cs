@@ -1276,12 +1276,12 @@ internal partial class Program
         }
 
         // Ctrl+Tab / Ctrl+Shift+Tab drive the MRU session walk (needs WM_KEYUP to commit, so it lives
-        // here rather than the keymap dispatch). Honoured only while the chord is still bound to the
-        // session-cycle action (default) — a user rebind of the chord falls through to keymap dispatch.
+        // here rather than the keymap dispatch). Honoured only while the chord is explicitly bound to
+        // a session-cycle action — an unmap or a user rebind falls through to keymap dispatch.
         if (!_isQuickWindow && ctrl && !alt && vk == VK_TAB)
         {
             string mruChord = shift ? "ctrl+shift+tab" : "ctrl+tab";
-            if (!_keymap.TryGetValue(mruChord, out var mruAct) || mruAct is "next_session" or "previous_session")
+            if (Keymap.UsesMruTabWalk(_keymap, mruChord))
             { MruWalk(shift ? -1 : 1); return true; }
         }
 

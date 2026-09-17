@@ -57,6 +57,30 @@ public class NavigationTests
     [Fact] public void LeaderIsStillExactlyOneChord()
     { var result = Keymap.Parse("leader=f6|f7"); Assert.Null(result.Leader); Assert.Single(result.Diagnostics); }
 
+    [Fact] public void UnmapDropsDefaultBinding()
+    {
+        var result = Keymap.Parse("unmap ctrl+d\nmap ctrl+alt+d = split_pane");
+        Assert.Empty(result.Diagnostics);
+        Assert.False(result.Bindings.ContainsKey("ctrl+d"));
+        Assert.Equal("split_pane", result.Bindings["ctrl+alt+d"]);
+    }
+
+    [Theory]
+    [InlineData("", "ctrl+tab", true)]
+    [InlineData("", "ctrl+shift+tab", true)]
+    [InlineData("unmap ctrl+tab", "ctrl+tab", false)]
+    [InlineData("unmap ctrl+shift+tab", "ctrl+shift+tab", false)]
+    [InlineData("map ctrl+tab = toggle_sidebar", "ctrl+tab", false)]
+    public void MruTabWalkRequiresAnExplicitSessionCycleBinding(string config, string chord, bool expected)
+        => Assert.Equal(expected, Keymap.UsesMruTabWalk(Keymap.Parse(config).Bindings, chord));
+
+    [Theory]
+    [InlineData("ctrl+insert", "ctrl+insert")]
+    [InlineData("ctrl+ins", "ctrl+insert")]
+    [InlineData("shift+insert", "shift+insert")]
+    public void InsertChordsCanonicalize(string chord, string expected)
+        => Assert.Equal(expected, Keymap.Canonicalize(chord));
+
     [Theory]
     [InlineData("CMD.EXE", false, true, "cmd")][InlineData("pwsh.exe", false, true, "pwsh")]
     [InlineData("powershell.exe", false, true, "powershell")][InlineData("bash", false, true, "bash")]

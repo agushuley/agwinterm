@@ -5,16 +5,17 @@ namespace Agwinterm.Core;
 /// <summary>
 /// Parses %LOCALAPPDATA%\agwinterm\keymap.conf into chord→action bindings and custom
 /// commands. Our own simple format (inspired by agterm, not copied):
-///   map &lt;chord&gt; = &lt;action&gt;          rebind a built-in action
-///   map &lt;chord&gt; | &lt;chord&gt; = &lt;action&gt;  bind alternatives (also after map leader)
+///   map &lt;chord&gt; = &lt;action&gt;          rebind one built-in action to one chord
+///   map &lt;chord&gt;[|&lt;chord&gt;...] = &lt;action&gt;  same action on several chords (| separates; any count)
 ///   map &lt;chord&gt; = command:&lt;Label&gt;  bind a chord to a custom command
 ///   command &lt;Label&gt; = &lt;text&gt;       run &lt;text&gt; (default: type it into the active session)
 ///   command [new|overlay|detached|send] &lt;Label&gt; = &lt;text&gt;   choose the run mode
 ///   leader = &lt;chord&gt;                 set the leader/prefix chord (tmux-style)
 ///   map leader &lt;chord&gt; = &lt;action|command:Label&gt;   bind a leader sequence
+///   unmap &lt;chord&gt;[|&lt;chord&gt;...]            drop binding(s); each | adds another chord on the same line
 ///   '#' starts a comment; blank lines ignored.
 /// A canonical chord is "[ctrl+][alt+][shift+]&lt;key&gt;" where key ∈ a–z, 0–9, f1–f12,
-/// tab, enter, escape, space, up, down, left, right, or an OEM punctuation name
+/// tab, enter, escape, space, up, down, left, right, insert, delete (aliases ins/del), or an OEM punctuation name
 /// (comma, period, slash, semicolon, quote, backtick, minus, equals, lbracket, rbracket, backslash) —
 /// so shifted-symbol chords bind via shift+&lt;base&gt; (e.g. shift+slash for '?', shift+semicolon for ':').
 /// The command &lt;text&gt; may contain {AGW_*} tokens (expanded from the active session) and the
@@ -79,16 +80,18 @@ public static class Keymap
         """
         # agwinterm keymap (our own simple format)
         #
-        #   map <chord> = <action>          rebind a built-in action
-        #   map <chord> | <chord> = <action> bind alternatives (also map leader ...)
+        #   map <chord> = <action>          one chord → one built-in action
+        #   map <chord>[|<chord>...] = <action>   same action on many chords (| is not “exactly two”)
         #   map <chord> = command:<Label>   bind a chord to a custom command below
         #   command <Label> = <text>        run <text> (default: type it into the active session)
         #   command [new|overlay|detached] <Label> = <text>   choose the run mode
         #   leader = <chord>                set a leader/prefix chord (tmux-style)
         #   map leader <chord> = <action|command:Label>        bind a leader sequence
+        #   unmap <chord>                     drop one binding (key reaches the shell)
+        #   unmap <chord>[|<chord>...]         drop several on one line (same | rules as map)
         #
         # chords: ctrl+ alt+ shift+ then a key — a-z, 0-9, f1-f12,
-        #         tab enter escape space up down left right,
+        #         tab enter escape space up down left right, insert delete (ins/del),
         #         comma period slash semicolon quote backtick minus equals
         #         lbracket rbracket backslash (US layout).  e.g. shift+comma, ctrl+shift+g
         #
@@ -108,6 +111,11 @@ public static class Keymap
         #
         # Examples (uncomment to use):
         # map escape = close_cover        # Esc hides the quick/scratch/overlay cover (falls through otherwise)
+        # map ctrl+g | alt+g = next_workspace   # pipe = more chords on the same line, not a second operand
+        # unmap ctrl+d                    # drop default split on Ctrl+D (^D reaches the shell)
+        # map ctrl+alt+d = split_pane
+        # map ctrl+insert = copy_selection
+        # map shift+insert = paste        # pair with copy-on-ctrl-c = false in agwinterm.conf for ^C interrupt
         # map ctrl+shift+g = command:Greet
         # command Greet = echo hello from {AGW_SESSION}
         # command [new] Log = echo running in {AGW_CWD}
@@ -133,6 +141,11 @@ public static class Keymap
         /// <summary>Second chord (canonical) → action id / "command:&lt;Label&gt;", pressed after the leader.</summary>
         public readonly Dictionary<string, string> LeaderBindings = new(StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>Whether an explicit session-cycle binding should use the Ctrl+Tab MRU walk.</summary>
+    public static bool UsesMruTabWalk(IReadOnlyDictionary<string, string> bindings, string chord)
+        => bindings.TryGetValue(chord, out var action)
+           && action is "next_session" or "previous_session";
 
     /// <summary>Parse keymap text; starts from the defaults, then applies map/command/leader lines.</summary>
     public static Parsed Parse(string text)
@@ -180,6 +193,17 @@ public static class Keymap
                 else { p.Diagnostics.Add($"line {lineNo}: unknown action '{target}'"); continue; }
                 foreach (string? chord in chords) into[chord!] = action;
             }
+            else if (line.StartsWith("unmap ", StringComparison.OrdinalIgnoreCase))
+            {
+                string chordRaw = line["unmap ".Length..].Trim();
+                bool isLeader = chordRaw.StartsWith("leader ", StringComparison.OrdinalIgnoreCase);
+                if (isLeader) chordRaw = chordRaw["leader ".Length..].Trim();
+                var chords = chordRaw.Split('|').Select(Canonicalize).ToArray();
+                if (chords.Any(chord => chord is null))
+                { p.Diagnostics.Add($"line {lineNo}: bad unmap chord '{chordRaw}'"); continue; }
+                var from = isLeader ? p.LeaderBindings : p.Bindings;
+                foreach (string? chord in chords) from.Remove(chord!);
+            }
             else if (line.StartsWith("command ", StringComparison.OrdinalIgnoreCase))
             {
                 int eq = line.IndexOf('=');
@@ -201,7 +225,7 @@ public static class Keymap
                 if (label.Length == 0 || cmdText.Length == 0) { p.Diagnostics.Add($"line {lineNo}: command needs a label and text"); continue; }
                 p.Commands.Add(new CmdDef(label, cmdText, mode));
             }
-            else p.Diagnostics.Add($"line {lineNo}: expected 'map', 'command' or 'leader'");
+            else p.Diagnostics.Add($"line {lineNo}: expected 'map', 'unmap', 'command' or 'leader'");
         }
         return p;
     }
@@ -220,7 +244,7 @@ public static class Keymap
                 case "shift": shift = true; break;
                 default:
                     if (key is not null) return null; // more than one key token
-                    string nk = tokRaw.ToLowerInvariant() == "esc" ? "escape" : tokRaw.ToLowerInvariant();
+                    string nk = NormalizeKeyToken(tokRaw);
                     if (!IsKey(nk)) return null;
                     key = nk;
                     break;
@@ -235,6 +259,7 @@ public static class Keymap
         if (t.Length == 1 && char.IsLetterOrDigit(t[0])) return true;
         if (t.Length is 2 or 3 && t[0] == 'f' && int.TryParse(t[1..], out int n) && n is >= 1 and <= 12) return true;
         return t is "tab" or "enter" or "escape" or "space" or "up" or "down" or "left" or "right"
+            or "insert" or "delete"
             // OEM punctuation (US layout), so symbol chords like shift+comma ('<') bind too.
             or "comma" or "period" or "slash" or "semicolon" or "quote" or "backtick"
             or "minus" or "equals" or "lbracket" or "rbracket" or "backslash";
@@ -257,6 +282,7 @@ public static class Keymap
                 "ctrl" => "Ctrl", "alt" => "Alt", "shift" => "Shift",
                 "tab" => "Tab", "enter" => "Enter", "escape" => "Esc", "space" => "Space",
                 "up" => "Up", "down" => "Down", "left" => "Left", "right" => "Right",
+                "insert" => "Insert", "delete" => "Delete",
                 "comma" => ",", "period" => ".", "slash" => "/", "semicolon" => ";", "quote" => "'",
                 "backtick" => "`", "minus" => "-", "equals" => "=", "lbracket" => "[", "rbracket" => "]", "backslash" => "\\",
                 _ when p.Length >= 2 && p[0] == 'f' && char.IsDigit(p[1]) => "F" + p[1..],
@@ -264,6 +290,18 @@ public static class Keymap
             });
         }
         return sb.ToString();
+    }
+
+    private static string NormalizeKeyToken(string tokRaw)
+    {
+        string t = tokRaw.ToLowerInvariant();
+        return t switch
+        {
+            "esc" => "escape",
+            "ins" => "insert",
+            "del" => "delete",
+            _ => t,
+        };
     }
 
     /// <summary>Build the canonical chord for a live keypress, or null if the key isn't bindable.</summary>
@@ -301,6 +339,8 @@ public static class Keymap
             0xDC => "backslash",
             0xDD => "rbracket",
             0xDE => "quote",
+            0x2D => "insert",
+            0x2E => "delete",
             _ => null,
         };
     }
