@@ -1404,19 +1404,18 @@ internal partial class Program
     }
 
     private static bool SessionHasLiveShell(Ses ses) => ses.Panes.Any(p => !p.S.HasExited);
-    private static bool SessionHasExitedShell(Ses ses) => ses.Panes.All(p => p.S.HasExited);
 
     /// <summary>Confirm one UI session close, showing a background target before asking and restoring focus afterwards.</summary>
     private bool ConfirmCloseOk(Ses ses)
     {
-        bool hasExitedShell = SessionHasExitedShell(ses);
-        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, hasExitedShell)) return true;
+        bool hasLiveShell = SessionHasLiveShell(ses);
+        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, hasLiveShell)) return true;
         Ses? prior = _active;
         bool switched = !ReferenceEquals(prior, ses);
         if (switched) SetActive(ses);
-        string outcome = hasExitedShell
-            ? "Its shell has exited and its visible output will no longer be available."
-            : "This will end what's running in it.";
+        string outcome = hasLiveShell
+            ? "This will end what's running in it."
+            : "Its shell has exited and its visible output will no longer be available.";
         bool confirmed = MessageBoxW(_hwnd, $"Close {ses.Name} in {ses.Ws.Name}?\n\n{outcome}", "Close session",
                                      MB_YESNO | MB_ICONQUESTION) == IDYES;
         if (switched && prior is not null && AllSessions().Contains(prior)) SetActive(prior);
@@ -1427,11 +1426,10 @@ internal partial class Program
     private bool ConfirmCloseOk(IReadOnlyCollection<Ses> sessions)
     {
         if (sessions.Count == 0) return true;
-        var exited = sessions.Where(SessionHasExitedShell).ToList();
-        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, exited.Count > 0)) return true;
+        var live = sessions.Where(SessionHasLiveShell).ToList();
+        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, live.Count > 0)) return true;
         if (sessions.Count == 1) return ConfirmCloseOk(sessions.Single());
 
-        var live = sessions.Where(SessionHasLiveShell).ToList();
         string liveNames = live.Count == 0
             ? "None"
             : string.Join("\n", live.Select(s => $"- {s.Name} ({s.Ws.Name})"));

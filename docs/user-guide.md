@@ -125,9 +125,9 @@ Everything is rebindable in `keymap.conf` (see `F1` for the live list).
   custom bindings so the key reaches the shell; use `unmap ctrl+d` for a single chord, or
   `unmap a | b` to clear several at once. Reload with **File → Reload Keymap** or
   `agwintermctl keymap reload`.
-- **Session close policy:** `confirm-close-session = false` (default) never prompts; `exited` confirms
-  only before closing a session whose shells have all exited, preserving visible output; `true` confirms
-  every user-initiated close. A background target is shown during its confirmation, then the previously
+- **Session close policy:** `confirm-close-session = false` (default) never prompts; `live` confirms
+  before closing a session with at least one running shell; `true` confirms every user-initiated close.
+  A background target is shown during its confirmation, then the previously
   active session is restored whether the close is confirmed or cancelled. One confirmation covers a
   selected group and lists its live session tabs, their count, and the count of other tabs with exited
   shells. `auto-close-session-on-exit = true` removes a single-pane session after its shell exits and

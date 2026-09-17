@@ -173,7 +173,7 @@ public sealed class TerminalConfig
     /// <summary>Where new sessions open: home (user profile) | current (active session's cwd) | custom (NewSessionDir).</summary>
     public string NewSessionDirMode { get; set; } = "home";
 
-    /// <summary>Whether UI session close confirms: false | exited | true. Off by default.</summary>
+    /// <summary>Whether UI session close confirms: false | live | true. Off by default.</summary>
     public string ConfirmCloseSession { get; set; } = "false";
 
     /// <summary>Close a single-pane session when its shell exits. Off by default.</summary>
@@ -372,7 +372,7 @@ public sealed class TerminalConfig
         # Where new sessions open: home (user profile) | current (active session's dir) | custom (new-session-dir).
         new-session-dir-mode = home
 
-        # Confirm before closing a session: false | exited (only when every shell exited) | true.
+        # Confirm before closing a session: false | live (when any shell is still running) | true.
         confirm-close-session = false
         # Close a single-pane session when its shell exits (it is not added to Reopen Closed Session).
         auto-close-session-on-exit = false
@@ -519,12 +519,12 @@ public sealed class TerminalConfig
     /// <summary>Whether a config token is a supported close-confirmation mode.</summary>
     public static bool IsConfirmCloseSessionMode(string value)
         => value.Equals("false", StringComparison.OrdinalIgnoreCase)
-           || value.Equals("exited", StringComparison.OrdinalIgnoreCase)
+           || value.Equals("live", StringComparison.OrdinalIgnoreCase)
            || value.Equals("true", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether a UI session close needs confirmation for the supplied session state.</summary>
-    public static bool ShouldConfirmCloseSession(string mode, bool hasExitedShell)
-        => mode == "true" || mode == "exited" && hasExitedShell;
+    public static bool ShouldConfirmCloseSession(string mode, bool hasLiveShell)
+        => mode == "true" || mode == "live" && hasLiveShell;
 
     private static bool ParseBool(string v, bool fallback) => v.ToLowerInvariant() switch
     {

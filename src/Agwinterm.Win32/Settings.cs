@@ -109,7 +109,7 @@ internal partial class Program
         _setRows.Add(new SetRow { Kind = SW.Path, Tab = 0, Key = "new-session-dir", Label = "Custom directory" });
         Tog(0, "restore-commands", "Restore running commands");
         Drop(0, "confirm-close-session", "Confirm before closing sessions",
-            new[] { "Off", "Exited shells only", "Always" }, new[] { "false", "exited", "true" });
+            new[] { "Off", "Live shells only", "Always" }, new[] { "false", "live", "true" });
         Tog(0, "auto-close-session-on-exit", "Close session when its shell exits");
         // pty-host opt-in (#105): server mode keeps shells alive across UI restarts/updates/crashes.
         Drop(0, "session-host", "Session host (shells survive restarts)",

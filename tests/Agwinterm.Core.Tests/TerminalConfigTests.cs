@@ -30,23 +30,24 @@ public class TerminalConfigTests
 
     [Theory]
     [InlineData("", "false")]
-    [InlineData("confirm-close-session = exited", "exited")]
+    [InlineData("confirm-close-session = live", "live")]
     [InlineData("confirm-close-session = TRUE", "true")]
     [InlineData("confirm-close-session = interactive", "false")]
+    [InlineData("confirm-close-session = exited", "false")]
     [InlineData("confirm-close-session = unknown", "false")]
     public void CloseSessionPolicyParsesKnownModes(string text, string expected)
     {
         var config = TerminalConfig.Parse(text);
         Assert.Equal(expected, config.ConfirmCloseSession);
-        Assert.Contains("exited", TerminalConfig.DefaultText);
+        Assert.Contains("live", TerminalConfig.DefaultText);
     }
 
     [Fact]
-    public void CloseSessionPolicySeparatesExitedShellsFromAllSessions()
+    public void CloseSessionPolicySeparatesLiveShellsFromExitedSessions()
     {
         Assert.False(TerminalConfig.ShouldConfirmCloseSession("false", true));
-        Assert.False(TerminalConfig.ShouldConfirmCloseSession("exited", false));
-        Assert.True(TerminalConfig.ShouldConfirmCloseSession("exited", true));
+        Assert.False(TerminalConfig.ShouldConfirmCloseSession("live", false));
+        Assert.True(TerminalConfig.ShouldConfirmCloseSession("live", true));
         Assert.True(TerminalConfig.ShouldConfirmCloseSession("true", false));
         Assert.True(TerminalConfig.ShouldConfirmCloseSession("true", true));
     }
