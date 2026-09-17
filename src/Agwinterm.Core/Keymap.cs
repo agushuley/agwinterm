@@ -81,7 +81,7 @@ public static class Keymap
         # agwinterm keymap (our own simple format)
         #
         #   map <chord> = <action>          one chord → one built-in action
-        #   map <chord>[|<chord>...] = <action>   same action on many chords (| is not “exactly two”)
+        #   map <chord>[|<chord>...] = <action>   same action on any number of chords
         #   map <chord> = command:<Label>   bind a chord to a custom command below
         #   command <Label> = <text>        run <text> (default: type it into the active session)
         #   command [new|overlay|detached] <Label> = <text>   choose the run mode
@@ -141,6 +141,11 @@ public static class Keymap
         /// <summary>Second chord (canonical) → action id / "command:&lt;Label&gt;", pressed after the leader.</summary>
         public readonly Dictionary<string, string> LeaderBindings = new(StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>Whether an explicit session-cycle binding should use the Ctrl+Tab MRU walk.</summary>
+    public static bool UsesMruTabWalk(IReadOnlyDictionary<string, string> bindings, string chord)
+        => bindings.TryGetValue(chord, out var action)
+           && action is "next_session" or "previous_session";
 
     /// <summary>Parse keymap text; starts from the defaults, then applies map/command/leader lines.</summary>
     public static Parsed Parse(string text)

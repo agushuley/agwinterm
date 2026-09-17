@@ -65,6 +65,47 @@ public class NavigationTests
         Assert.Equal("split_pane", result.Bindings["ctrl+alt+d"]);
     }
 
+    [Fact] public void UnmapCtrlTabRemovesBindingFromParseResult()
+    {
+        var result = Keymap.Parse("unmap ctrl+tab");
+        Assert.Empty(result.Diagnostics);
+        Assert.False(result.Bindings.ContainsKey("ctrl+tab"));
+    }
+
+    [Fact] public void UnmapPipeClearsBothChords()
+    {
+        var result = Keymap.Parse("map ctrl+g | alt+g = next_workspace\nunmap ctrl+g | alt+g");
+        Assert.Empty(result.Diagnostics);
+        Assert.False(result.Bindings.ContainsKey("ctrl+g"));
+        Assert.False(result.Bindings.ContainsKey("alt+g"));
+    }
+
+    [Fact] public void UnmapLeaderDropsLeaderBinding()
+    {
+        var result = Keymap.Parse("leader=f10\nmap leader g = next_workspace\nunmap leader g");
+        Assert.Empty(result.Diagnostics);
+        Assert.False(result.LeaderBindings.ContainsKey("g"));
+    }
+
+    [Fact] public void BadUnmapChordProducesOneDiagnostic()
+    {
+        var result = Keymap.Parse("unmap not+a+real+chord");
+        Assert.Single(result.Diagnostics);
+        Assert.Contains("bad unmap chord", result.Diagnostics[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] public void InsertVkMapsToInsertChord()
+        => Assert.Equal("insert", Keymap.ChordFor(0x2D, false, false, false));
+
+    [Theory]
+    [InlineData("", "ctrl+tab", true)]
+    [InlineData("", "ctrl+shift+tab", true)]
+    [InlineData("unmap ctrl+tab", "ctrl+tab", false)]
+    [InlineData("unmap ctrl+shift+tab", "ctrl+shift+tab", false)]
+    [InlineData("map ctrl+tab = toggle_sidebar", "ctrl+tab", false)]
+    public void MruTabWalkRequiresAnExplicitSessionCycleBinding(string config, string chord, bool expected)
+        => Assert.Equal(expected, Keymap.UsesMruTabWalk(Keymap.Parse(config).Bindings, chord));
+
     [Theory]
     [InlineData("ctrl+insert", "ctrl+insert")]
     [InlineData("ctrl+ins", "ctrl+insert")]
