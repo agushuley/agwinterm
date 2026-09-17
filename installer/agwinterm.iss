@@ -2,7 +2,10 @@
 ; Build via installer\build.ps1 (publishes to stage\ then runs ISCC on this file).
 
 #define AppName    "agwinterm"
-#define AppVersion "0.20.0"
+; Fork releases: AppVersion = <upstream-version>-ah.<incremental>. Reset incremental to 1 on each new upstream base.
+#define AppVersion "0.20.0-ah.4"
+; VersionInfoVersion: fourth field = -ah incremental (here 4). VersionInfoTextVersion shows the full AppVersion.
+#define VersionInfoVersion "0.20.0.4"
 #define AppExe     "Agwinterm.Win32.exe"
 #define AppPublisher "Boris Kudriashov"
 ; The main app defaults new sessions to the Rust pty-host as a first-run seed only (it never
@@ -14,7 +17,8 @@ AppId={{A7E3F1C2-5B9D-4E6A-8C21-3F0D9B4A7E15}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#VersionInfoVersion}
+VersionInfoTextVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\agwinterm
 DisableProgramGroupPage=yes
 DisableDirPage=auto
