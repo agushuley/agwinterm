@@ -31,7 +31,7 @@ if (-not $text.Contains($expectedPe, [System.StringComparison]::Ordinal)) {
 
 $updated = $text.Replace($appMatch.Value, "#define AppVersion `"$appVersion`"")
 $updated = $updated.Replace($expectedPe, "#define VersionInfoVersion `"$peVersion`"")
-$updated = [regex]::Replace($updated, '(?m)^; PE file version: four numeric fields; the fourth is the ah build index \(here \d+\)\.$', "; PE file version: four numeric fields; the fourth is the ah build index (here $next).")
+$updated = [regex]::Replace($updated, '(?m)^; VersionInfoVersion: fourth field = -ah incremental \(here \d+\)\. VersionInfoTextVersion shows the full AppVersion\.$', "; VersionInfoVersion: fourth field = -ah incremental (here $next). VersionInfoTextVersion shows the full AppVersion.")
 
 if ($updated -eq $text) { throw "No local release version was updated." }
 if ($PSCmdlet.ShouldProcess($iss, "advance local release to $appVersion")) {
