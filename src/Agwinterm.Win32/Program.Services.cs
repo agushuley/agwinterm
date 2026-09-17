@@ -268,6 +268,7 @@ internal partial class Program
     private void DrawTitleBar(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush)
     {
         _titleButtons.Clear();
+        _menuBarLabels.Clear(); _menuBarRect = default; _titleTextRect = default;
         if (ToolbarHidden) return;   // hidden toolbar: no chrome at all (full-bleed terminal)
         int cw = ClientW();
         brush.Color = ChromeBg;
@@ -306,7 +307,11 @@ internal partial class Program
         string title = _active is not null ? SessionDisplayName(_active) : AppName;
         // 4. Attention bell (can be hidden via settings; when hidden it reserves no space).
         bool showBell = _config.AttentionButton;
-        float titleX = _sidebarW > 0 ? _sidebarW + 10f : togX + togW + 8f;
+        // The menu bar (MenuBar.cs) sits where the title used to start and the title moves right by
+        // it; a label that would reach the right group is dropped rather than drawn over it.
+        float barX = _sidebarW > 0 ? _sidebarW + 10f : togX + togW + 8f;
+        float barEnd = DrawMenuBar(rt, brush, barX, rgLeft - 120f);
+        float titleX = barEnd > barX ? barEnd + 12f : barX;
         float bellW = showBell ? 34f : 0f, bellGap = showBell ? 8f : 0f;
         // The recents clock (drawn after the bell while the sidebar is hidden) is reserved HERE like the
         // bell, so an ellipsized title cannot push it over the right group (#246): bellW wide + its 2 px gap.
@@ -346,6 +351,7 @@ internal partial class Program
         float titleW = MathF.Max(30f, MathF.Min(titleMeasured, titleShare - ctxReserve));
         brush.Color = ChromeText;
         rt.DrawText(title, _uiTitle, new Rect(titleX, 0f, titleW, TitleBarH), brush);  // one vertically-centered, ellipsized row
+        _titleTextRect = new Rect(titleX, 0f, titleW, TitleBarH);   // File ▸ Rename Window… puts its field here
         float runEnd = titleX + titleW;   // right edge of the title run (title, pills, then the context suffix when set)
         float pillX = runEnd + 10f;       // anchored on the title alone — never on the context
         foreach (var (label, bg, w) in pills)
@@ -589,14 +595,21 @@ internal partial class Program
     {
         if (_toastText is null) return;
         int cw = ClientW(), ch = ClientH();
-        float tw = MeasureText(_toastText, _uiFont) + 32f, th = 34f;
+        // Wrapped inside the content area: a reload's toast carries every note of the keys it applied
+        // (a refused hotkey, a backend switch), and a single unbounded line ran off both edges.
+        float maxW = Math.Max(120f, (cw - _sidebarW) - 32f);
+        using var layout = _dwrite.CreateTextLayout(_toastText, _uiFont, Math.Max(1f, maxW - 32f), Math.Max(1f, ch - 48f));
+        layout.WordWrapping = WordWrapping.Wrap;
+        float tw = Math.Min(maxW, layout.Metrics.Width + 32f), th = Math.Max(34f, layout.Metrics.Height + 16f);
+        layout.MaxWidth = Math.Max(1f, tw - 32f); layout.MaxHeight = th;
+        layout.ParagraphAlignment = ParagraphAlignment.Center;
         float cx = _sidebarW + ((cw - _sidebarW) - tw) / 2f;
         float ty = ch - th - 24f;
         _toastRect = new Rect(cx, ty, tw, th);   // recorded for click-to-jump hit-testing
         brush.Color = Mix(ChromeBg, ChromeText, 0.14f);
         rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(cx, ty, tw, th), RadiusX = 8f, RadiusY = 8f }, brush);
         brush.Color = ChromeText;
-        rt.DrawText(_toastText, _uiFont, new Rect(cx + 16f, ty, tw - 24f, th), brush);
+        rt.DrawTextLayout(new System.Numerics.Vector2(cx + 16f, ty), layout, brush, DrawTextOptions.Clip);
     }
 
     /// <summary>While a leader sequence is pending, a small pill hint (bottom-left of the content region).</summary>
@@ -921,7 +934,7 @@ internal partial class Program
         "new-session-dir", "right-click-paste", "copy-on-select", "copy-on-ctrl-c", "word-delimiters", "desktop-notifications", "shell-integration",
         "restore-commands", "restore-buffer", "blocked-sound", "notification-sound", "omp-theme", "omp-integration", "prompt-engine", "starship-theme",
         "new-session-dir-mode", "confirm-close-session", "compact-toolbar", "toolbar-mode", "notification-badges", "workspace-add-button",
-        "show-scratch-button", "show-split-button", "show-dashboard-button", "show-quick-button",
+        "show-scratch-button", "show-split-button", "show-dashboard-button", "show-quick-button", "show-menu-bar",
         "quick-terminal-size", "quick-terminal-hotkey",
         "attention-button", "status-color-active", "status-color-blocked", "status-color-completed",
         "paste-protection", "clipboard-write", "notification-flash", "claude-update-check", "update-check",
@@ -1000,6 +1013,7 @@ internal partial class Program
         "show-split-button" => _config.ShowSplitButton ? "true" : "false",
         "show-dashboard-button" => _config.ShowDashboardButton ? "true" : "false",
         "show-quick-button" => _config.ShowQuickButton ? "true" : "false",
+        "show-menu-bar" => _config.ShowMenuBar ? "true" : "false",
         "quick-terminal-size" => _config.QuickTerminalSize.ToString(),
         "quick-terminal-hotkey" => _config.QuickTerminalHotkey,
         "notification-flash" => _config.NotificationFlash,
@@ -1035,43 +1049,98 @@ internal partial class Program
             if (SetQuickHotkey(value.Trim(), () => WriteConfigKey(key, value.Trim())) is { } error) return error;
         }
         else WriteConfigKey(key, value.Trim());
-        _config = TerminalConfig.Load(ConfigPath);       // reparse so clamping/validation is centralized
-        if (key == "quick-terminal-size" && _quickHost?._quickVisible == true) _quickHost.PositionQuick();
-        if (key == "theme") _theme = FindTheme(_config.Theme);
-        if (key is "theme" or "theme-follow-system" or "theme-dark" or "theme-light") ApplySystemTheme();
-        if (key == "session-host")
+        // Reparse so clamping/validation is centralized, and apply what the file changed — this key
+        // always. The steps' notes go into ONE toast: a set that also picks up hand edits of the
+        // backend and the core would otherwise show only the last note.
+        var notes = new List<string>();
+        ReloadConfigApplying(key, notes);
+        if (notes.Count > 0) ShowToast(string.Join("\n", notes), 7000);
+        bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
+        return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
+    }
+
+    /// <summary>Re-read agwinterm.conf into <see cref="_config"/> and apply every key whose value
+    /// changed, plus <paramref name="alwaysKey"/> — the key a <c>config set</c> just wrote, applied
+    /// even when its value reads the same. The file is the truth: a key edited by hand is applied by
+    /// the next set or reload, so <c>_config</c> never holds an unapplied value (the theme picker and
+    /// the prompt-engine writers update <c>_config</c> themselves as they apply, and a set of the
+    /// hotkey registers before it writes). The file's quick-terminal hotkey is registered whenever
+    /// it is not the registered chord — a no-op when it is, which includes right after a set of the
+    /// hotkey — so a hand edit takes effect at the next set or reload and a chord refused earlier (at
+    /// startup, or by the last reload) is tried again; a refusal leaves the previous chord
+    /// registered while <c>config get</c> reports the file. The refusal is noted by every reload,
+    /// but by a set only when the hotkey text changed since the last load: a text that cannot
+    /// register would otherwise be reported again on every Settings toggle and slider step. Every
+    /// note goes into <paramref name="notes"/>, never straight to a toast — the toast has one slot.
+    /// Returns the keys applied. Runs on the UI thread.</summary>
+    private List<string> ReloadConfigApplying(string? alwaysKey, List<string> notes)
+    {
+        var before = ConfigKeys.ToDictionary(k => k, ConfigValue, StringComparer.Ordinal);
+        _config = TerminalConfig.Load(ConfigPath);
+        var changed = ConfigKeys.Where(k => ConfigValue(k) != before[k]).ToList();
+        if (alwaysKey is not null && !changed.Contains(alwaysKey)) changed.Add(alwaysKey);
+        if (SetQuickHotkey(_config.QuickTerminalHotkey) is { } hotkeyError)
+        {
+            bool report = alwaysKey is null || changed.Contains("quick-terminal-hotkey");
+            changed.Remove("quick-terminal-hotkey");
+            if (report) notes.Add(hotkeyError);
+        }
+        ApplyConfigKeys(changed, notes);
+        return changed;
+    }
+
+    /// <summary>The live effects of <paramref name="keys"/> having changed in <see cref="_config"/>:
+    /// the per-key steps (a backend, a core, the blink timer, the quick size, a regrid, a font) and
+    /// the unconditional refresh. Both <c>config set</c> and File ▸ Reload Config reach it through
+    /// <see cref="ReloadConfigApplying"/> with every key the file changed — one list of steps, so a
+    /// reload cannot fall short of a set (the quick-terminal hotkey is the one step outside it: its
+    /// registration can be refused, so <see cref="ReloadConfigApplying"/> runs it first and notes a
+    /// refusal). A step's note — the backend and core switches announce themselves, and a font that
+    /// fell back says so — is collected into <paramref name="notes"/> for the caller's ONE toast:
+    /// the toast has one slot, and a note toasted here would be replaced by the next before it was
+    /// ever drawn. Runs on the UI thread.</summary>
+    private void ApplyConfigKeys(IReadOnlyCollection<string> keys, List<string> notes)
+    {
+        bool Has(string k) => keys.Contains(k);
+        void Note(string text) => notes.Add(text);
+        if (Has("quick-terminal-size") && _quickHost?._quickVisible == true) _quickHost.PositionQuick();
+        if (Has("theme")) _theme = FindTheme(_config.Theme);
+        if (Has("theme") || Has("theme-follow-system") || Has("theme-dark") || Has("theme-light")) ApplySystemTheme();
+        if (Has("session-host"))
         {
             // Live switch (#105 2d): NEW sessions use the chosen backend immediately; existing panes
             // keep the one they were born with (both kinds coexist fine) and converge on restart.
             _sessionBackend = SessionBackends.Resolve(_config.SessionHost, _argPipe ?? _appId, AppExePath);
-            ShowToast(_config.SessionHost switch
+            Note(_config.SessionHost switch
             {
                 "server" => "server mode ON (experimental) — new sessions survive UI restarts; restart agwinterm to move existing ones",
                 "server-rust" => "Rust server mode ON (experimental) — new sessions live in the Rust pty-host; restart agwinterm to move existing ones",
                 _ => "in-process mode — new sessions run in the window process; restart agwinterm to convert existing ones",
-            }, 6000);
+            });
         }
-        if (key == "emulator-core")
+        if (Has("emulator-core"))
         {
             // Live switch, same semantics as session-host: NEW sessions get the chosen core;
             // existing panes keep the one they were born with and converge on restart.
             ResolveEmulatorCore();
-            ShowToast(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator", 6000);
+            Note(_emulatorCoreNote ?? "emulator-core = managed — new sessions use the C# emulator");
             _emulatorCoreNote = null;   // startup path only announces once
         }
-        if (key == "cursor-blink-ms")
+        if (Has("cursor-blink-ms"))
             foreach (var window in _registry.Values.ToArray())
                 if (window._hwnd != IntPtr.Zero) SetTimer(window._hwnd, (IntPtr)1, (uint)_config.CursorBlinkMs, IntPtr.Zero);
         RecomputeChrome();
         ApplyWindowOpacity();
-        if (key is "compact-toolbar" or "toolbar-mode")   // title-bar height changed → reflow the terminal grid
+        if (Has("compact-toolbar") || Has("toolbar-mode"))   // title-bar height changed → reflow the terminal grid
         { if (_active is not null) RegridSession(_active); if (_cover is not null) RegridCover(); }
-        if (key is "font-family" or "font-size") RebuildFont();   // apply live to the running window
-        if (key == "sidebar-font-size") RebuildSidebarFonts();    // apply the new sidebar name size live
+        if (Has("font-family") || Has("font-size"))
+        {
+            RebuildFont();   // apply live to the running window; it toasts a fallback itself, and the
+            if (_fontFallbackNote is { } fontNote && !notes.Contains(fontNote)) Note(fontNote);   // caller's toast, which replaces that, must carry it too
+        }
+        if (Has("sidebar-font-size")) RebuildSidebarFonts();         // apply the new sidebar name size live
         RequestRedraw();
         RefreshSettingsControls();                        // keep an open Settings window in sync
-        bool deferred = key is "scrollback-lines" or "shell-integration" or "restore-commands";
-        return $"{key} = {ConfigValue(key)}" + (deferred ? "  (applies to new sessions)" : "");
     }
 
     /// <summary>

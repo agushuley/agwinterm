@@ -79,6 +79,26 @@
 - **MRU `Ctrl+Tab` switcher**, fuzzy **command / session / action palettes**, search, tmux-style
   **leader chords**, custom commands with `{AGW_*}` tokens and run modes.
 
+## Menu bar
+
+The title bar carries agterm's menus — **File**, **View**, **Navigate**, **Help** — as a row of
+labels after the sidebar toggle. Every row shows its *effective* shortcut (a rebind in `keymap.conf`
+shows the rebind), a row that cannot apply right now is dim, and a state row's label follows the
+state (Hide Sidebar / Show Sidebar, Flag / Unflag Session). Two rows open a flyout: **File ▸ Open
+Window** (the window library, a check mark on the open ones) and **File ▸ Open Recent** (closed
+sessions and workspaces).
+
+It takes the Windows keyboard model: a lone **Alt** tap or **F10** focuses the bar (←/→ move, ↓ or
+Enter opens, Esc leaves), **Alt+F / Alt+V / Alt+N / Alt+H** open a menu directly, and inside an open
+menu ←/→ switch menus. A `keymap.conf` binding on an Alt+letter chord wins over the mnemonic, so a
+shell that wants Alt+F keeps it by binding it. The bar is a UIA menu bar, so a screen reader reads
+and runs it. `show-menu-bar = false` in `agwinterm.conf` (or `agwintermctl config set show-menu-bar
+false`) removes it; the hidden toolbar mode shows no chrome and so no bar.
+
+agterm's items that have no agwinterm counterpart are left out rather than invented: Edit / Reload
+Hooks, Toggle Terminal Zoom, Reset Live Sessions, and the focus-set items (Add Workspace to Focus,
+Toggle Workspace Filter, Clear Focus — agwinterm's workspace focus is one workspace at a time).
+
 ## Keyboard essentials
 
 | Key | Action |
@@ -90,6 +110,7 @@
 | `Ctrl+Tab` | MRU session switcher |
 | `Ctrl+D` | Split pane · `` Ctrl+` `` quick terminal · `Ctrl+J` scratch |
 | `Ctrl+Shift+P` | Action palette |
+| `Alt` (tap) / `F10` | Menu bar · `Alt+F` `Alt+V` `Alt+N` `Alt+H` open a menu |
 | `F11` | Fullscreen |
 
 Everything is rebindable in `keymap.conf` (see `F1` for the live list).
@@ -98,5 +119,6 @@ Everything is rebindable in `keymap.conf` (see `F1` for the live list).
 
 - **`%LOCALAPPDATA%\agwinterm\agwinterm.conf`** — appearance and behavior (also editable in Settings).
 - **`%LOCALAPPDATA%\agwinterm\keymap.conf`** — keybindings, custom commands and leader chords.
+- `show-menu-bar = false` hides the title-bar menu bar (File ▸ Edit agwinterm.conf… opens the file).
 - Themes: the bundled set ships with the app; drop extra ghostty-format `*.conf` files in
   `%LOCALAPPDATA%\agwinterm\themes\`.

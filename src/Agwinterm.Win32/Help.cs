@@ -58,12 +58,15 @@ internal partial class Program
             "FOCUS & NAVIGATION",
             "F6            move focus between terminal and sidebar (arrows + Enter there)",
             "F1            this help (including while full-screen terminal apps run)",
+            "Alt or F10    menu bar (File  View  Navigate  Help): arrows move, Enter opens, Esc leaves",
+            "              (a full-screen program keeps its F10; the Alt tap still reaches the bar)",
+            "Alt+F/V/N/H   open a menu directly (a keymap chord on the same keys wins)",
             "Esc           close overlays (help, settings, palettes, search)",
             "",
             "KEY BINDINGS (effective — keymap.conf applied)",
         };
         foreach (var kv in _keymap.OrderBy(k => FriendlyAction(k.Value), StringComparer.OrdinalIgnoreCase))
-            lines.Add($"{PrettyChord(kv.Key),-20}{FriendlyAction(kv.Value)}");
+            lines.Add($"{Agwinterm.Core.Keymap.DisplayChord(kv.Key),-20}{FriendlyAction(kv.Value)}");
         lines.AddRange(new[]
         {
             "",
@@ -79,10 +82,6 @@ internal partial class Program
         });
         return lines.ToArray();
     }
-
-    private static string PrettyChord(string chord) =>
-        string.Join("+", chord.Split('+').Select(p => p.Length == 1 ? p.ToUpperInvariant()
-            : char.ToUpperInvariant(p[0]) + p[1..]));
 
     private static string FriendlyAction(string a) =>
         a.Replace('_', ' ') is { Length: > 0 } s ? char.ToUpperInvariant(s[0]) + s[1..] : a;
