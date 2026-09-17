@@ -1044,7 +1044,7 @@ internal partial class Program
         if (key == "cursor-blink-ms" && (!int.TryParse(value.Trim(), out int blinkMs) || blinkMs <= 0))
             return "error: cursor-blink-ms must be a positive integer";
         if (key == "confirm-close-session" && !TerminalConfig.IsConfirmCloseSessionMode(value.Trim()))
-            return "error: confirm-close-session must be false, interactive or true";
+            return "error: confirm-close-session must be false, exited or true";
         if (key == "auto-close-session-on-exit" && value.Trim().ToLowerInvariant() is not ("true" or "false" or "on" or "off" or "yes" or "no" or "1" or "0"))
             return "error: auto-close-session-on-exit must be a boolean";
         if (key == "quick-terminal-size" && (!int.TryParse(value.Trim(), out int qs) || qs is < 40 or > 90))

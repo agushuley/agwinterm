@@ -125,10 +125,13 @@ Everything is rebindable in `keymap.conf` (see `F1` for the live list).
   custom bindings so the key reaches the shell; use `unmap ctrl+d` for a single chord, or
   `unmap a | b` to clear several at once. Reload with **File → Reload Keymap** or
   `agwintermctl keymap reload`.
-- **Session close policy:** `confirm-close-session = false` (default) never prompts; `interactive` and
-  `true` confirm before closing a live session, including a background session after briefly showing it.
-  A session whose panes have all exited never prompts. `auto-close-session-on-exit = true` removes a
-  single-pane session after its shell exits and does not add it to **Reopen Closed Session**.
+- **Session close policy:** `confirm-close-session = false` (default) never prompts; `exited` confirms
+  only before closing a session whose shells have all exited, preserving visible output; `true` confirms
+  every user-initiated close. A background target is shown during its confirmation, then the previously
+  active session is restored whether the close is confirmed or cancelled. One confirmation covers a
+  selected group and lists its live session tabs, their count, and the count of other tabs with exited
+  shells. `auto-close-session-on-exit = true` removes a single-pane session after its shell exits and
+  does not add it to **Reopen Closed Session**.
 - `show-menu-bar = false` hides the title-bar menu bar (File ▸ Edit agwinterm.conf… opens the file).
 - Themes: the bundled set ships with the app; drop extra ghostty-format `*.conf` files in
   `%LOCALAPPDATA%\agwinterm\themes\`.
