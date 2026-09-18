@@ -1403,18 +1403,48 @@ internal partial class Program
         RequestRedraw();
     }
 
-    /// <summary>Confirm a user-initiated session close (Yes/No), unless confirm-close-session is off.</summary>
-    private bool ConfirmCloseOk()
-        => !_config.ConfirmCloseSession
-           || MessageBoxW(_hwnd, "Close this session and end what's running in it?", "Close session",
-                          MB_YESNO | MB_ICONQUESTION) == IDYES;
+    private static bool SessionHasLiveShell(Ses ses) => ses.Panes.Any(p => !p.S.HasExited);
+
+    /// <summary>Confirm one UI session close, showing a background target before asking and restoring focus afterwards.</summary>
+    private bool ConfirmCloseOk(Ses ses)
+    {
+        bool hasLiveShell = SessionHasLiveShell(ses);
+        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, hasLiveShell)) return true;
+        Ses? prior = _active;
+        bool switched = !ReferenceEquals(prior, ses);
+        if (switched) SetActive(ses);
+        string outcome = hasLiveShell
+            ? "This will end what's running in it."
+            : "Its shell has exited and its visible output will no longer be available.";
+        bool confirmed = MessageBoxW(_hwnd, $"Close {ses.Name} in {ses.Ws.Name}?\n\n{outcome}", "Close session",
+                                     MB_YESNO | MB_ICONQUESTION) == IDYES;
+        if (switched && prior is not null && AllSessions().Contains(prior)) SetActive(prior);
+        return confirmed;
+    }
+
+    /// <summary>Confirm an atomic batch close without stealing focus from the active session.</summary>
+    private bool ConfirmCloseOk(IReadOnlyCollection<Ses> sessions)
+    {
+        if (sessions.Count == 0) return true;
+        var live = sessions.Where(SessionHasLiveShell).ToList();
+        if (!TerminalConfig.ShouldConfirmCloseSession(_config.ConfirmCloseSession, live.Count > 0)) return true;
+        if (sessions.Count == 1) return ConfirmCloseOk(sessions.Single());
+
+        string liveNames = live.Count == 0
+            ? "None"
+            : string.Join("\n", live.Select(s => $"- {s.Name} ({s.Ws.Name})"));
+        int otherTabs = sessions.Count - live.Count;
+        string message = $"Close {sessions.Count} sessions?\n\nLive sessions ({live.Count}):\n{liveNames}\n\nOther tabs with exited shells: {otherTabs}.";
+        return MessageBoxW(_hwnd, message, "Close sessions",
+                           MB_YESNO | MB_ICONQUESTION) == IDYES;
+    }
 
     /// <summary>Close the focused pane; if it's the last pane, close the whole session.</summary>
     private void CloseActivePane()
     {
         var ses = _active;
         if (ses is null) return;
-        if (ses.Panes.Count <= 1) { if (ConfirmCloseOk()) CloseSessionInternal(ses); return; }
+        if (ses.Panes.Count <= 1) { if (ConfirmCloseOk(ses)) CloseSessionInternal(ses); return; }
         ClosePane(ses, ses.ActivePane);
     }
 

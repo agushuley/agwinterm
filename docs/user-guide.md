@@ -129,7 +129,14 @@ bar when nothing else bound it), **Ctrl+Shift+D** (dashboard), **Ctrl+`** (quick
   **Ctrl+Tab** / **Ctrl+Shift+Tab** run the MRU session walk only while the chord is explicitly bound
   to `next_session` or `previous_session`; after `unmap ctrl+tab` MRU does not run and the chord
   follows the normal keymap / terminal path. Use `unmap ctrl+d` for one chord, or `unmap a | b` for
-  several. Reload with **File → Reload Keymap** or `agwintermctl keymap reload`.
+  several.   Reload with **File → Reload Keymap** or `agwintermctl keymap reload`.
+- **Session close confirmation:** `confirm-close-session = false` (default) never prompts; `live` confirms
+  before closing a session with at least one **live shell**; `true` confirms every user-initiated
+  session-tab close (including tabs whose shells have exited). A background target is shown during its
+  confirmation, then the previously active session is restored whether the close is confirmed or
+  cancelled. One confirmation covers a multi-selected group and lists its live session tabs, their
+  count, and the count of other selected tabs with **exited shells**. Control API closes and automatic
+  shell-exit handling are unchanged.
 - `show-menu-bar = false` hides the title-bar menu bar (File ▸ Edit agwinterm.conf… opens the file).
 - Themes: the bundled set ships with the app; drop extra ghostty-format `*.conf` files in
   `%LOCALAPPDATA%\agwinterm\themes\`.

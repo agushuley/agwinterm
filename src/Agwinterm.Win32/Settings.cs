@@ -108,7 +108,8 @@ internal partial class Program
             new[] { "Home directory", "Current session's dir", "Custom directory" }, new[] { "home", "current", "custom" });
         _setRows.Add(new SetRow { Kind = SW.Path, Tab = 0, Key = "new-session-dir", Label = "Custom directory" });
         Tog(0, "restore-commands", "Restore running commands");
-        Tog(0, "confirm-close-session", "Confirm before closing");
+        Drop(0, "confirm-close-session", "Confirm before closing sessions",
+            new[] { "Off", "Live shells only", "Always" }, new[] { "false", "live", "true" });
         // pty-host opt-in (#105): server mode keeps shells alive across UI restarts/updates/crashes.
         Drop(0, "session-host", "Session host (shells survive restarts)",
             new[] { "In-process (default)", "Pty-host server (experimental)", "Pty-host server: Rust (experimental)" },

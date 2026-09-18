@@ -173,8 +173,8 @@ public sealed class TerminalConfig
     /// <summary>Where new sessions open: home (user profile) | current (active session's cwd) | custom (NewSessionDir).</summary>
     public string NewSessionDirMode { get; set; } = "home";
 
-    /// <summary>Ask for confirmation before a user closes a session (Ctrl+Shift+W / menu Close). Off by default.</summary>
-    public bool ConfirmCloseSession { get; set; } = false;
+    /// <summary>Whether UI session close confirms: false | live | true. Off by default.</summary>
+    public string ConfirmCloseSession { get; set; } = "false";
 
     /// <summary>Compact toolbar: a shorter title bar. Off by default. Legacy — superseded by
     /// <see cref="ToolbarMode"/>; kept as a decode shim so old settings still open.</summary>
@@ -369,7 +369,7 @@ public sealed class TerminalConfig
         # Where new sessions open: home (user profile) | current (active session's dir) | custom (new-session-dir).
         new-session-dir-mode = home
 
-        # Ask before closing a session (Ctrl+Shift+W / right-click Close).
+        # Confirm before closing a session: false | live (when any shell is still running) | true.
         confirm-close-session = false
 
         # Title-bar chrome: normal | compact | hidden (hidden = full-bleed terminal, thin top drag strip).
@@ -476,7 +476,9 @@ public sealed class TerminalConfig
                     break;
                 case "starship-theme": cfg.StarshipTheme = val; break;
                 case "new-session-dir-mode": { var m = val.ToLowerInvariant(); if (m is "home" or "current" or "custom") cfg.NewSessionDirMode = m; break; }
-                case "confirm-close-session": cfg.ConfirmCloseSession = ParseBool(val, cfg.ConfirmCloseSession); break;
+                case "confirm-close-session":
+                    if (IsConfirmCloseSessionMode(val)) cfg.ConfirmCloseSession = val.ToLowerInvariant();
+                    break;
                 case "compact-toolbar": cfg.CompactToolbar = ParseBool(val, cfg.CompactToolbar); break;
                 case "toolbar-mode": { var m = val.Trim().ToLowerInvariant(); if (m is "normal" or "compact" or "hidden") cfg.ToolbarMode = m; break; }
                 case "notification-badges": cfg.NotificationBadges = ParseBool(val, cfg.NotificationBadges); break;
@@ -514,4 +516,14 @@ public sealed class TerminalConfig
         "false" or "no" or "off" or "0" => false,
         _ => fallback,
     };
+
+    /// <summary>Whether a config token is a supported close-confirmation mode.</summary>
+    public static bool IsConfirmCloseSessionMode(string value)
+        => value.Equals("false", StringComparison.OrdinalIgnoreCase)
+           || value.Equals("live", StringComparison.OrdinalIgnoreCase)
+           || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a UI session close needs confirmation for the supplied session state.</summary>
+    public static bool ShouldConfirmCloseSession(string mode, bool hasLiveShell)
+        => mode == "true" || mode == "live" && hasLiveShell;
 }

@@ -1004,7 +1004,7 @@ internal partial class Program
         "prompt-engine" => _config.PromptEngine,
         "starship-theme" => _config.StarshipTheme,
         "new-session-dir-mode" => _config.NewSessionDirMode,
-        "confirm-close-session" => _config.ConfirmCloseSession ? "true" : "false",
+        "confirm-close-session" => _config.ConfirmCloseSession,
         "compact-toolbar" => _config.CompactToolbar ? "true" : "false",
         "toolbar-mode" => ToolbarModeResolved,
         "notification-badges" => _config.NotificationBadges ? "true" : "false",
@@ -1042,6 +1042,8 @@ internal partial class Program
             return "error: cursor-blink must be a boolean";
         if (key == "cursor-blink-ms" && (!int.TryParse(value.Trim(), out int blinkMs) || blinkMs <= 0))
             return "error: cursor-blink-ms must be a positive integer";
+        if (key == "confirm-close-session" && !TerminalConfig.IsConfirmCloseSessionMode(value.Trim()))
+            return "error: confirm-close-session must be false, live, or true";
         if (key == "quick-terminal-size" && (!int.TryParse(value.Trim(), out int qs) || qs is < 40 or > 90))
             return "error: quick-terminal-size must be an integer from 40 through 90";
         if (key == "quick-terminal-hotkey")
