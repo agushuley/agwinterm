@@ -3,9 +3,9 @@
 
 #define AppName    "agwinterm"
 ; Fork releases: AppVersion = <upstream-version>-ah.<incremental>. Reset incremental to 1 on each new upstream base.
-#define AppVersion "0.20.1-ah.1"
+#define AppVersion "0.20.9-ah.1"
 ; VersionInfoVersion: fourth field = -ah incremental (here 1). VersionInfoTextVersion shows the full AppVersion.
-#define VersionInfoVersion "0.20.1.1"
+#define VersionInfoVersion "0.20.9.1"
 #define AppExe     "Agwinterm.Win32.exe"
 #define AppPublisher "Boris Kudriashov"
 ; The main app defaults new sessions to the Rust pty-host as a first-run seed only (it never
