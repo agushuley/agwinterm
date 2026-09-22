@@ -345,6 +345,11 @@ internal partial class Program : ISessionHost, IWindowHost
         public long LastScrollGen; // emulator ScrollGeneration last seen on output (detects real scroll vs in-place repaint)
         public int Unread;         // unread desktop-notification count (OSC 9/777 / notify) since last visit
         public bool ReadOnly;      // block keyboard input to this pane (protect a running agent from stray keys)
+        /// <summary>Profile/login-shell pane (not <c>session new --command</c>): may show an in-terminal
+        /// exit hold after the shell exits.</summary>
+        public bool ExitHoldEligible;
+        /// <summary>Shell exited; prompt was fed into scrollback; Enter dismisses and closes the session tab.</summary>
+        public bool AwaitingExitAck;
         // Text selection (absolute line index: [0..HistoryCount) history, then the live grid rows).
         public bool HasSel;
         public int SelAncLine, SelAncCol, SelFocLine, SelFocCol;

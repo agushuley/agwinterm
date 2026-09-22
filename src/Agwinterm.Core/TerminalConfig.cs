@@ -176,6 +176,9 @@ public sealed class TerminalConfig
     /// <summary>Ask for confirmation before a user closes a session (Ctrl+Shift+W / menu Close). Off by default.</summary>
     public bool ConfirmCloseSession { get; set; } = false;
 
+    /// <summary>After a profile/login-shell exits, keep scrollback and show an in-terminal prompt; Enter closes the tab (agterm/libghostty hold). On by default.</summary>
+    public bool HoldSessionOnExit { get; set; } = true;
+
     /// <summary>Compact toolbar: a shorter title bar. Off by default. Legacy — superseded by
     /// <see cref="ToolbarMode"/>; kept as a decode shim so old settings still open.</summary>
     public bool CompactToolbar { get; set; } = false;
@@ -372,6 +375,9 @@ public sealed class TerminalConfig
         # Ask before closing a session (Ctrl+Shift+W / right-click Close).
         confirm-close-session = false
 
+        # After a normal shell tab exits: in-terminal "Press Enter to close the session" (agterm hold); Enter removes the tab.
+        hold-session-on-exit = true
+
         # Title-bar chrome: normal | compact | hidden (hidden = full-bleed terminal, thin top drag strip).
         toolbar-mode = normal
 
@@ -477,6 +483,7 @@ public sealed class TerminalConfig
                 case "starship-theme": cfg.StarshipTheme = val; break;
                 case "new-session-dir-mode": { var m = val.ToLowerInvariant(); if (m is "home" or "current" or "custom") cfg.NewSessionDirMode = m; break; }
                 case "confirm-close-session": cfg.ConfirmCloseSession = ParseBool(val, cfg.ConfirmCloseSession); break;
+                case "hold-session-on-exit": cfg.HoldSessionOnExit = ParseBool(val, cfg.HoldSessionOnExit); break;
                 case "compact-toolbar": cfg.CompactToolbar = ParseBool(val, cfg.CompactToolbar); break;
                 case "toolbar-mode": { var m = val.Trim().ToLowerInvariant(); if (m is "normal" or "compact" or "hidden") cfg.ToolbarMode = m; break; }
                 case "notification-badges": cfg.NotificationBadges = ParseBool(val, cfg.NotificationBadges); break;
