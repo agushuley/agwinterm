@@ -1484,7 +1484,7 @@ internal partial class Program
     /// <summary>After a profile/login-shell exits in a lone pane, feed an agterm-style in-terminal hold prompt.</summary>
     private void TryEnterExitHold(Pane pane, int exitCode)
     {
-        if (!_config.HoldSessionOnExit || !pane.ExitHoldEligible || pane.AwaitingExitAck || !pane.S.HasExited) return;
+        if (!pane.ExitHoldEligible || pane.AwaitingExitAck || !pane.S.HasExited) return;
         Ses? ses;
         lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(pane));
         if (ses is null || ses.Panes.Count != 1) return;

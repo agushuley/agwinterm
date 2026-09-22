@@ -6,9 +6,9 @@
 
 When a **profile / login-shell** tab’s process exits, agwinterm keeps scrollback and appends an **in-terminal** hold message (`Press Enter to close the session.`). **Enter** removes the session tab via `CloseSessionInternal` — **not** `ConfirmCloseOk()` (boolean `confirm-close-session` unchanged for sidebar/menu closes).
 
-## Config
+## Scope
 
-- `hold-session-on-exit = true` (default) — profile shells only; not `session new --command`.
+Always on for profile/login-shell tabs; not `session new --command`. No config key.
 
 ## References
 

@@ -103,12 +103,5 @@ public class TerminalConfigTests
         Assert.Equal(16, c.FontSize);
     }
 
-    [Fact]
-    public void HoldSessionOnExit_DefaultsTrueAndParses()
-    {
-        Assert.True(TerminalConfig.Parse("").HoldSessionOnExit);
-        Assert.False(TerminalConfig.Parse("hold-session-on-exit = false").HoldSessionOnExit);
-        Assert.Contains("hold-session-on-exit", TerminalConfig.DefaultText);
-    }
 
 }
