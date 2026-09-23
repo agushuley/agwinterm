@@ -249,7 +249,11 @@ internal partial class Program
         if (isPwsh && (pargs is null || pargs.Length == 0))
             _ = session.StartAsync(cmd, ShellArgs(), extraEnv: env, cwd: pcwd, deElevate: deElevate, freshEnv: _config.FreshEnv);        // wrap + omp (cwd-in-title)
         else
-            _ = session.StartAsync(cmd, pargs ?? Array.Empty<string>(), extraEnv: env, cwd: pcwd, deElevate: deElevate, freshEnv: _config.FreshEnv); // raw shell
+        {
+            var argv = pargs ?? Array.Empty<string>();
+            var commandLine = new SessionCommand(cmd, argv).QuotedArgs;
+            _ = session.StartAsync(cmd, commandLine, verbatimCommandLine: true, extraEnv: env, cwd: pcwd, deElevate: deElevate, freshEnv: _config.FreshEnv);
+        }
     }
 
     /// <summary>Per-pane implementation of the emulator's host-action seam. Emulator calls arrive on

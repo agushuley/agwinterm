@@ -198,7 +198,7 @@ public sealed class TerminalSession : ISession
         {
             // Manual pseudoconsole with the interactive user's token (Porta.Pty can't drop integrity).
             string cmd = commandLine is { Length: > 0 }
-                ? QuoteArg(app) + " " + string.Join(' ', Array.ConvertAll(commandLine, QuoteArg))
+                ? QuoteArg(app) + " " + (verbatimCommandLine ? string.Join(' ', commandLine) : string.Join(' ', Array.ConvertAll(commandLine, QuoteArg)))
                 : QuoteArg(app);
             IPtyConnection dc;
             try { dc = DeElevatedPty.Spawn(cmd, string.IsNullOrEmpty(cwd) ? Environment.CurrentDirectory : cwd, Cols, Rows); }
