@@ -31,6 +31,14 @@ public class SessionCommandTests
         Assert.Equal(launch.Args, roundTrip.Args);
     }
 
+    [Fact]
+    public void QuotedArgsLeavesPlainProfileArgumentsUnquoted()
+    {
+        var launch = new SessionCommand("C:\\Windows\\System32\\wsl.exe", ["-d", "Ubuntu"]);
+
+        Assert.Equal(new[] { "-d", "Ubuntu" }, launch.QuotedArgs);
+    }
+
     [Theory]
     [InlineData("", "direct", false, null)]
     [InlineData("  ", null, true, null)]
