@@ -37,6 +37,12 @@ namespace Agwinterm.Win32ControlTest
         public static extern IntPtr SendMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+
+        public static void PostReturn(IntPtr h) {
+            PostMessageW(h, 0x0100, (IntPtr)0x0D, (IntPtr)1);
+            PostMessageW(h, 0x0102, (IntPtr)0x0D, (IntPtr)1);
+            PostMessageW(h, 0x0101, (IntPtr)0x0D, (IntPtr)1);
+        }
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
@@ -1096,6 +1102,35 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
         }
         Check 'session paste <text> --target <a session whose process exited> is refused "the pane''s process has exited" (the session is still listed)' ($p6ExitMade.ok -and $p6ExitPaste -and (-not $p6ExitPaste.ok) -and ([string]$p6ExitPaste.error) -eq "the pane's process has exited" -and (Get-SessionSnapshot $p6Exited)) "new=$($p6ExitMade | ConvertTo-Json -Compress) paste=$($p6ExitPaste | ConvertTo-Json -Compress)"
         if ($p6Exited) { try { Invoke-Ctl @('session', 'close', $p6Exited) | Out-Null } catch { } }
+        # Profile/login-shell exit hold: in-terminal prompt; Enter dismisses and removes the session tab.
+        $ehMade = Invoke-Ctl @('session', 'new', '--name', 'exit-hold', '--no-select')
+        $ehId = if ($ehMade.ok) { [string]$ehMade.result } else { $null }
+        $ehHoldSeen = $false
+        $ehGone = $false
+        if ($ehId) {
+            for ($i = 0; $i -lt 30 -and -not (Get-SessionSnapshot $ehId); $i++) { Start-Sleep -Milliseconds 200 }
+            Invoke-Ctl @('session', 'select', '--target', $ehId) | Out-Null
+            Invoke-Ctl @('session', 'type', "exit 42`r", '--target', $ehId) | Out-Null
+            $ehText = ''
+            for ($i = 0; $i -lt 40; $i++) {
+                Start-Sleep -Milliseconds 250
+                $ehText = [string](Invoke-Ctl @('session', 'text', '--target', $ehId)).result
+                if ($ehText -match 'Press Enter to close the session') { $ehHoldSeen = $true; break }
+            }
+            if ($ehHoldSeen) {
+                $ehHwnd = $process.MainWindowHandle
+                if ($ehHwnd -ne [IntPtr]::Zero) {
+                    [Agwinterm.Win32ControlTest.NativeMethods]::PostReturn($ehHwnd)
+                    Start-Sleep -Milliseconds 400
+                    for ($i = 0; $i -lt 20; $i++) {
+                        if (-not (Get-SessionSnapshot $ehId)) { $ehGone = $true; break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                }
+            }
+        }
+        Check 'profile shell exit feeds an in-terminal hold prompt' ($ehMade.ok -and $ehHoldSeen) "new=$($ehMade | ConvertTo-Json -Compress) text-tail=$($ehText.Substring([Math]::Max(0, $ehText.Length - 120)))"
+        Check 'Enter on exit hold closes the session tab (tree no longer lists it)' ($ehHoldSeen -and $ehGone) "id=$ehId"
         # The other slot is empty: copy / text / result name the slot; result on the held slot is "still running".
         $p5CopyLeft = Invoke-Ctl @('session', 'overlay', 'copy', '--pane', 'left', '--target', $p5Id)
         $p5TextLeft = Invoke-Ctl @('session', 'overlay', 'text', '--pane', 'left', '--target', $p5Id)
