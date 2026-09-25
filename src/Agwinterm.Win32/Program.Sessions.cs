@@ -79,7 +79,8 @@ internal partial class Program
         // re-syncs the mirrors, and an ADOPTED session's reader thread is already feeding by now.
         lock (session.SyncRoot) session.Emulator.ScrollbackMax = _config.Scrollback;
         var pane = new Pane { Id = paneId, S = session, StartCwd = cwd, FontSize = fontSize,
-            FontZoomed = fontSize != (float)_config.FontSize };
+            FontZoomed = fontSize != (float)_config.FontSize,
+            ProfileShell = sessionCommand is null && handoff is null && string.IsNullOrWhiteSpace(command) };
         // New output snaps this pane back to the live bottom when the buffer ACTUALLY scrolled (a line
         // pushed into history) — not on every repaint. TUIs like Claude Code redraw in place without
         // scrolling, so a mouse selection survives those frames. #copy-selection
@@ -116,7 +117,11 @@ internal partial class Program
         // An explicit --sound on session.status: play its spec (null => default alert).
         session.SoundRequested += PlayStatusSound;
         session.Emulator.Host = new PaneHost(this, pane, session);   // the host-action seam (see IHostActions)
-        session.Exited += _ => Post(() => OnPaneProcessExited(pane));   // split survivor promotion (agterm #121)
+        session.Exited += code => Post(() =>
+        {
+            OnPaneProcessExited(pane);   // split survivor promotion (agterm #121)
+            NotifyProfileShellExit(pane, code);
+        });
         var env = new Dictionary<string, string>
         {
             ["AGWINTERM"] = "1",
@@ -1500,6 +1505,21 @@ internal partial class Program
         lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(p));
         if (ses is null || ses.Panes.Count <= 1) return;   // not a live split pane → leave the shell as-is
         ClosePane(ses, p);
+    }
+
+    /// <summary>Report the exit of a lone profile/login shell without changing its visible buffer.</summary>
+    private void NotifyProfileShellExit(Pane pane, int exitCode)
+    {
+        if (!pane.ProfileShell || pane.ProfileExitCode is not null || !pane.S.HasExited) return;
+        Ses? ses;
+        lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(pane));
+        if (ses is null || ses.Panes.Count != 1) return;
+        pane.ProfileExitCode = exitCode;
+        RequestRedraw();
+        EmitEvent("tree");
+        if (!ReferenceEquals(pane, ActiveSurface()) || !_windowActive)
+            OnNotified(pane, "Session ended", $"{ses.Name} exited with code {exitCode}.",
+                exitCode == 0 ? NotificationCategory.Ok : NotificationCategory.Attention);
     }
 
     /// <summary>A recently-closed session's restorable identity (IDE "reopen closed" / browser Ctrl+Shift+T).

@@ -354,6 +354,8 @@ internal partial class Program : ISessionHost, IWindowHost
         public int Unread;         // unread desktop-notification count (OSC 9/777 / notify) since last visit
         public NotificationCategory UnreadCategory; // highest priority among unread notifications
         public bool ReadOnly;      // block keyboard input to this pane (protect a running agent from stray keys)
+        public bool ProfileShell; // profile/login shell, not a session new --command pane
+        public int? ProfileExitCode; // ended profile shell; independent of agent status
         // Text selection (absolute line index: [0..HistoryCount) history, then the live grid rows).
         public bool HasSel;
         public int SelAncLine, SelAncCol, SelFocLine, SelFocCol;
@@ -1023,7 +1025,8 @@ internal partial class Program : ISessionHost, IWindowHost
             {
                 Kind = Uia.NodeKind.Session,
                 Index = s.UiaIdentity,
-                Name = s.Name,   // the name only — session.context is a note beside it, not a name; a reader gets it from tree --json / the palette line (P3)
+                Name = s.Panes.Count == 1 && s.ActivePane.ProfileExitCode is int exitCode
+                    ? $"{s.Name}, session ended (exit {exitCode})" : s.Name,
                 Parent = list,
                 Focused = _chromeFocus && ReferenceEquals(_focusRow, s),
                 Selected = ReferenceEquals(_active, s),

@@ -71,6 +71,10 @@
     PROMPT_COMMAND="__agw_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
   fi
   ```
+- When a **normal profile / login-shell** tab’s process exits, its exit code appears in the session's
+  accessible name and unread badge tooltip. A background exit sends an `ok` notification for code 0 or
+  `attention` for a non-zero code. The exited shell remains visible; tabs started with
+  `session new --command` are unchanged.
 
 ## Accessible — screen readers are first-class
 
