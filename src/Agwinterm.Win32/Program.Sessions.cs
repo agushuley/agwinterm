@@ -116,7 +116,11 @@ internal partial class Program
         // An explicit --sound on session.status: play its spec (null => default alert).
         session.SoundRequested += PlayStatusSound;
         session.Emulator.Host = new PaneHost(this, pane, session);   // the host-action seam (see IHostActions)
-        session.Exited += _ => Post(() => OnPaneProcessExited(pane));   // split survivor promotion (agterm #121)
+        session.Exited += code => Post(() =>
+        {
+            OnPaneProcessExited(pane);   // split survivor promotion (agterm #121)
+            TryEnterExitHold(pane, code);
+        });
         var env = new Dictionary<string, string>
         {
             ["AGWINTERM"] = "1",
@@ -150,6 +154,7 @@ internal partial class Program
             // which cmd's /c quote-stripping rules would otherwise mangle).
             pane.Start = session.StartAsync("cmd.exe", new[] { "/c", command! }, verbatimCommandLine: true, extraEnv: env, cwd: cwd, freshEnv: _config.FreshEnv);
         else LaunchShell(session, profileName, env, cwd, deElevate);   // launch the chosen shell profile (default = Windows PowerShell)
+        pane.ExitHoldEligible = sessionCommand is null && handoff is null && string.IsNullOrWhiteSpace(command);
         return pane;
     }
 
@@ -1477,6 +1482,40 @@ internal partial class Program
         lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(p));
         if (ses is null || ses.Panes.Count <= 1) return;   // not a live split pane → leave the shell as-is
         ClosePane(ses, p);
+    }
+
+
+    /// <summary>After a profile/login-shell exits in a lone pane, feed an agterm-style in-terminal hold prompt.</summary>
+    private void TryEnterExitHold(Pane pane, int exitCode)
+    {
+        if (!pane.ExitHoldEligible || pane.AwaitingExitAck || !pane.S.HasExited) return;
+        Ses? ses;
+        lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(pane));
+        if (ses is null || ses.Panes.Count != 1) return;
+        pane.AwaitingExitAck = true;
+        pane.ExitHoldCode = exitCode;
+        string msg = Environment.NewLine + Environment.NewLine + "The session has ended (exit " + exitCode + ")." + Environment.NewLine + "Press Enter to close the session." + Environment.NewLine;
+        lock (pane.S.SyncRoot) pane.S.Emulator.Feed(System.Text.Encoding.UTF8.GetBytes(msg));
+        RequestRedraw();
+        EmitEvent("tree");
+        if (!ReferenceEquals(pane, ActiveSurface()) || !_windowActive)
+            OnNotified(pane, "Session ended", $"{ses.Name} exited with code {exitCode}.", successfulExit: exitCode == 0);
+    }
+
+    /// <summary>Enter on an exit-hold pane closes the tab without <see cref="ConfirmCloseOk"/>.</summary>
+    private bool TryCloseExitHoldOnEnter()
+    {
+        if (_active is not { } ses || ses.Panes.Count != 1) return false;
+        var pane = ses.ActivePane;
+        if (!pane.AwaitingExitAck) return false;
+        DismissExitHoldAndCloseSession(ses);
+        return true;
+    }
+
+    private void DismissExitHoldAndCloseSession(Ses ses)
+    {
+        foreach (var q in ses.Panes) { q.AwaitingExitAck = false; q.ExitHoldCode = null; }
+        CloseSessionInternal(ses);
     }
 
     /// <summary>A recently-closed session's restorable identity (IDE "reopen closed" / browser Ctrl+Shift+T).

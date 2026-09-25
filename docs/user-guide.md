@@ -52,6 +52,10 @@
   marks with jump-to-prompt, taskbar progress (OSC 9;4).
 - Shells are launched with `TERM_PROGRAM=agwinterm` (plus the usual `AGWINTERM_*` variables), so prompt
   engines, tmux and scripts can detect the host terminal.
+- When a **normal profile / login-shell** tab’s process exits, agwinterm keeps the scrollback and prints
+  an in-terminal message (`Press Enter to close the session.`). Press **Enter** to close the tab. This is
+  separate from overlay `--wait` footers and from `confirm-close-session` (that setting still applies only
+  when you close a tab from the sidebar or menu). Tabs started with `session new --command` are unchanged.
 
 ## Accessible — screen readers are first-class
 
