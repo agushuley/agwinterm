@@ -121,6 +121,7 @@ internal partial class Program
         {
             OnPaneProcessExited(pane);   // split survivor promotion (agterm #121)
             NotifyProfileShellExit(pane, code);
+            TryEnterExitHold(pane);
         });
         var env = new Dictionary<string, string>
         {
@@ -1526,6 +1527,29 @@ internal partial class Program
         if (!ReferenceEquals(pane, ActiveSurface()) || !_windowActive)
             OnNotified(pane, "Session ended", $"{ses.Name} exited with code {exitCode}.",
                 exitCode == 0 ? NotificationCategory.Ok : NotificationCategory.Attention);
+    }
+
+    /// <summary>Leave a visible exit prompt in a lone profile shell's scrollback.</summary>
+    private void TryEnterExitHold(Pane pane)
+    {
+        if (pane.ProfileExitCode is not int exitCode || pane.AwaitingExitAck) return;
+        Ses? ses;
+        lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(pane));
+        if (ses is null || ses.Panes.Count != 1) return;
+        pane.AwaitingExitAck = true;
+        string msg = Environment.NewLine + Environment.NewLine + "The session has ended (exit " + exitCode + ")." + Environment.NewLine + "Press Enter to close the session." + Environment.NewLine;
+        lock (pane.S.SyncRoot) pane.S.Emulator.Feed(System.Text.Encoding.UTF8.GetBytes(msg));
+        RequestRedraw();
+    }
+
+    /// <summary>Enter on an exit-hold pane closes the tab without <see cref="ConfirmCloseOk"/>.</summary>
+    private bool TryCloseExitHoldOnEnter()
+    {
+        if (_active is not { } ses || ses.Panes.Count != 1) return false;
+        if (!ses.ActivePane.AwaitingExitAck) return false;
+        ses.ActivePane.AwaitingExitAck = false;
+        CloseSessionInternal(ses);
+        return true;
     }
 
     /// <summary>A recently-closed session's restorable identity (IDE "reopen closed" / browser Ctrl+Shift+T).
