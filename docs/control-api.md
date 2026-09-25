@@ -66,6 +66,9 @@ The unread count remains the total number of messages. Its color reflects the hi
 unread category: `attention` red, then `normal` yellow, then `ok` green. Visiting the session or
 running `session seen` clears the count and category. A notification in the currently focused pane
 does not add an unread badge while the window is active. The agent-status circle is independent.
+The three badge colors can be changed in Settings → Notifications or with `agwintermctl config set
+notification-color-ok "#RRGGBB"` (likewise for `notification-color-normal` and
+`notification-color-attention`). This changes only presentation, not category priority or the count.
 
 ## `surface cursor`
 
