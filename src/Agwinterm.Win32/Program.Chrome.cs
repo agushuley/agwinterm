@@ -214,9 +214,17 @@ internal partial class Program
         {
             string bn = unread > 99 ? "99+" : unread.ToString();
             float bw = MeasureText(bn, _uiSmall) + 10f, bx = _sidebarW - 30f - bw;
-            brush.Color = new Color4(0.90f, 0.30f, 0.24f, 1f); // notification red pill
+            var notificationCategory = UnreadCategoryOf(s);
+            brush.Color = notificationCategory switch
+            {
+                NotificationCategory.Ok => new Color4(0.24f, 0.78f, 0.35f, 1f),
+                NotificationCategory.Normal => new Color4(0.95f, 0.72f, 0.20f, 1f),
+                _ => new Color4(0.90f, 0.30f, 0.24f, 1f),
+            };
             rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(bx, y + rowH / 2f - 8f, bw, 16f), RadiusX = 8f, RadiusY = 8f }, brush);
-            brush.Color = new Color4(1f, 1f, 1f, 1f);
+            brush.Color = notificationCategory == NotificationCategory.Normal
+                ? new Color4(0.12f, 0.10f, 0.07f, 1f)
+                : new Color4(1f, 1f, 1f, 1f);
             rt.DrawText(bn, _uiSmall, new Rect(bx + 5f, y + rowH / 2f - 8f, bw - 8f, 16f), brush);
         }
         // Status circle right-aligned in the row (agterm layout); pulse it if blink was requested.
