@@ -68,13 +68,17 @@ internal partial class Program
     }
 
     /// <summary>A pane raised a desktop notification. Runs on the UI thread (marshaled from the pump).</summary>
-    private void OnNotified(Pane p, string title, string body)
+    private void OnNotified(Pane p, string title, string body, bool successfulExit = false)
     {
         var ses = OwningSes(p);
         // Count it against the session unless you're looking at that pane right now (app focused AND it's
         // the active surface). If the app is in the background, even the active pane accrues a badge — which
         // then clears on refocus (agterm #164).
-        if (!ReferenceEquals(p, ActiveSurface()) || !_windowActive) p.Unread++;
+        if (!ReferenceEquals(p, ActiveSurface()) || !_windowActive)
+        {
+            p.Unread++;
+            if (successfulExit) p.UnreadSuccessfulExits++;
+        }
         string label = string.IsNullOrEmpty(title) ? body : $"{title}: {body}";
         _toastText = label.Length == 0 ? "(notification)" : label;
         _toastTarget = ses;                       // clicking the banner jumps to the raising session
@@ -142,7 +146,7 @@ internal partial class Program
     // session-wide overlay, counted on the term and cleared here, not summed into UnreadOf), scratch, overlay.
     private static void ClearUnread(Ses s)
     {
-        foreach (var p in s.Panes) { p.Unread = 0; if (p.Overlay.Term is { } po) po.Unread = 0; }
+        foreach (var p in s.Panes) { p.Unread = 0; p.UnreadSuccessfulExits = 0; if (p.Overlay.Term is { } po) po.Unread = 0; }
         if (s.Scratch is not null) s.Scratch.Unread = 0;
         if (s.Overlay.Term is { } ov) ov.Unread = 0;
     }

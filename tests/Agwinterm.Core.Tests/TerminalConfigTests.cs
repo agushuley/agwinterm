@@ -102,4 +102,6 @@ public class TerminalConfigTests
         Assert.True(c.CursorBlink);
         Assert.Equal(16, c.FontSize);
     }
+
+
 }

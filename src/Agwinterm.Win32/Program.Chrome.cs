@@ -144,7 +144,7 @@ internal partial class Program
         }
     }
 
-    /// <summary>Draw one session row (shared by tree + flagged modes): highlight, flag marker, name, unread badge, status dot.</summary>
+    /// <summary>Draw one session row (shared by tree + flagged modes): highlight, flag marker, name, unread badge, status indicators.</summary>
     private void DrawSessionRow(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, Ses s, float y, float rowH)
     {
         bool active = ReferenceEquals(_active, s);
@@ -184,11 +184,18 @@ internal partial class Program
             rt.DrawText("⚡", _uiSmall, new Rect(23f, y, 16f, rowH), brush);
             nameX = 40f;
         }
+        int? exitCode = s.Panes.Count == 1 ? s.ActivePane.ExitHoldCode : null;
+        int unread = UnreadOf(s);
+        string? badgeText = unread > 0 && _config.NotificationBadges ? (unread > 99 ? "99+" : unread.ToString()) : null;
+        float badgeWidth = badgeText is null ? 0f : MeasureText(badgeText, _uiSmall) + 10f;
+        float badgeX = _sidebarW - 30f - badgeWidth;
         bool isDrag = _dragging && ReferenceEquals(s, _dragItem);
         brush.Color = isDrag ? new Color4(0.5f, 0.53f, 0.57f, 0.45f) : (active ? SbActiveText : SbDimText);
         if (!ReferenceEquals(_editing, s)) // the rename box covers the name while editing
         {
-            float nameAvail = _sidebarW - nameX - 22f;
+            float nameRight = _sidebarW - 22f;
+            if (badgeText is not null) nameRight = MathF.Min(nameRight, badgeX - 5f);
+            float nameAvail = MathF.Max(0f, nameRight - nameX);
             // Clip + ellipsis-trim so a long name (or an enlarged sidebar font) never spills over the dot.
             rt.DrawText(s.Name, _sidebarFont, new Rect(nameX, y, nameAvail, rowH), brush, DrawTextOptions.Clip);
             RecordSidebarName(s, s.Name, nameX, y, nameAvail, rowH);
@@ -209,18 +216,19 @@ internal partial class Program
             }
         }
         // Unread-notification count badge, just left of the status circle (can be hidden; the count still tracks).
-        int unread = UnreadOf(s);
-        if (unread > 0 && _config.NotificationBadges)
+        if (badgeText is not null)
         {
-            string bn = unread > 99 ? "99+" : unread.ToString();
-            float bw = MeasureText(bn, _uiSmall) + 10f, bx = _sidebarW - 30f - bw;
-            brush.Color = new Color4(0.90f, 0.30f, 0.24f, 1f); // notification red pill
-            rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(bx, y + rowH / 2f - 8f, bw, 16f), RadiusX = 8f, RadiusY = 8f }, brush);
+            // A success-only unread count is green; mixed and ordinary notifications remain red.
+            brush.Color = s.Panes.Sum(p => p.UnreadSuccessfulExits) == unread
+                ? new Color4(0.24f, 0.78f, 0.35f, 1f)
+                : new Color4(0.90f, 0.30f, 0.24f, 1f);
+            rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(badgeX, y + rowH / 2f - 8f, badgeWidth, 16f), RadiusX = 8f, RadiusY = 8f }, brush);
             brush.Color = new Color4(1f, 1f, 1f, 1f);
-            rt.DrawText(bn, _uiSmall, new Rect(bx + 5f, y + rowH / 2f - 8f, bw - 8f, 16f), brush);
+            rt.DrawText(badgeText, _uiSmall, new Rect(badgeX + 5f, y + rowH / 2f - 8f, badgeWidth - 8f, 16f), brush);
+            if (exitCode is int code)
+                _sidebarNames.Add(new SidebarNameHit(s, $"{unread} unread; session ended (exit {code})", badgeX, y, badgeWidth, rowH));
         }
-        // Status circle right-aligned in the row (agterm layout); pulse it if blink was requested.
-        // Pane-aware: the dot shows the most attention-worthy status across ALL the session's panes.
+        // Pane-aware: the status circle shows the most attention-worthy state across ALL panes.
         var dot = StatusDot(AggStatus(s));
         if (AggBlink(s) && !_cursorOn) dot = new Color4(dot.R, dot.G, dot.B, 0.22f);
         brush.Color = dot;

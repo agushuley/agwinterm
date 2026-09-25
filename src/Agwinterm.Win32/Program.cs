@@ -344,7 +344,14 @@ internal partial class Program : ISessionHost, IWindowHost
         public int ScrollOffset;   // lines scrolled up from the live bottom (0 = live; clamped to HistoryCount)
         public long LastScrollGen; // emulator ScrollGeneration last seen on output (detects real scroll vs in-place repaint)
         public int Unread;         // unread desktop-notification count (OSC 9/777 / notify) since last visit
+        public int UnreadSuccessfulExits; // subset of Unread; only these can make the badge green
         public bool ReadOnly;      // block keyboard input to this pane (protect a running agent from stray keys)
+        /// <summary>Profile/login-shell pane (not <c>session new --command</c>): may show an in-terminal
+        /// exit hold after the shell exits.</summary>
+        public bool ExitHoldEligible;
+        /// <summary>Shell exited; prompt was fed into scrollback; Enter dismisses and closes the session tab.</summary>
+        public bool AwaitingExitAck;
+        public int? ExitHoldCode; // only an ended, held profile shell; independent of agent status
         // Text selection (absolute line index: [0..HistoryCount) history, then the live grid rows).
         public bool HasSel;
         public int SelAncLine, SelAncCol, SelFocLine, SelFocCol;
@@ -1014,7 +1021,8 @@ internal partial class Program : ISessionHost, IWindowHost
             {
                 Kind = Uia.NodeKind.Session,
                 Index = s.UiaIdentity,
-                Name = s.Name,   // the name only — session.context is a note beside it, not a name; a reader gets it from tree --json / the palette line (P3)
+                Name = s.Panes.Count == 1 && s.ActivePane.ExitHoldCode is int exitCode
+                    ? $"{s.Name}, session ended (exit {exitCode})" : s.Name,
                 Parent = list,
                 Focused = _chromeFocus && ReferenceEquals(_focusRow, s),
                 Selected = ReferenceEquals(_active, s),

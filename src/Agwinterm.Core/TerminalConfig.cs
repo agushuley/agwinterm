@@ -176,6 +176,7 @@ public sealed class TerminalConfig
     /// <summary>Ask for confirmation before a user closes a session (Ctrl+Shift+W / menu Close). Off by default.</summary>
     public bool ConfirmCloseSession { get; set; } = false;
 
+
     /// <summary>Compact toolbar: a shorter title bar. Off by default. Legacy — superseded by
     /// <see cref="ToolbarMode"/>; kept as a decode shim so old settings still open.</summary>
     public bool CompactToolbar { get; set; } = false;
@@ -371,6 +372,7 @@ public sealed class TerminalConfig
 
         # Ask before closing a session (Ctrl+Shift+W / right-click Close).
         confirm-close-session = false
+
 
         # Title-bar chrome: normal | compact | hidden (hidden = full-bleed terminal, thin top drag strip).
         toolbar-mode = normal
