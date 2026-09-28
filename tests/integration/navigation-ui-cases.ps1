@@ -268,7 +268,36 @@ Check 'DECSCUSR steady overrides enabled configured blinking' ((PixelDifference 
 $null=Rpc 'session.write' @{text=([string][char]27+'[0 q')} $session
 $null=Rpc 'config.set' @{key='cursor-blink';value='false'}
 [void][HudOwnedJob]::SendMessageW($hwnd,8,[IntPtr]::Zero,[IntPtr]::Zero)
-# Sidebar tooltip checks use only owned-window posted hover and screenshots, no desktop mouse movement.
+# Keep the real pointer inside the owned window while testing synthetic sidebar hover.
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class NavHover {
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int x, y; }
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd,ref POINT point);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr hwnd,uint message,IntPtr wParam,IntPtr lParam);
+    public static RECT Place(IntPtr hwnd) {
+        POINT pointer,client=new POINT(); RECT old;
+        if(!GetCursorPos(out pointer) || !GetWindowRect(hwnd,out old) || !ClientToScreen(hwnd,ref client))throw new Exception("Cannot position owned hover window");
+        if(!SetWindowPos(hwnd,(IntPtr)(-1),pointer.x-(client.x-old.left)-200,pointer.y-(client.y-old.top)-200,0,0,0x51))throw new Exception("Cannot move owned hover window");
+        if(GetAncestor(WindowFromPoint(pointer),2)!=hwnd)throw new Exception("Owned hover window is not under the pointer");
+        return old;
+    }
+    public static void Restore(IntPtr hwnd,RECT old) {
+        if(!SetWindowPos(hwnd,(IntPtr)(-2),old.left,old.top,0,0,0x51))throw new Exception("Cannot restore owned hover window");
+    }
+    public static void Move(IntPtr hwnd,int x,int y) {
+        var position=(IntPtr)((y << 16) | (x & 0xffff));
+        SendMessageW(hwnd,0x200,IntPtr.Zero,position);
+    }
+}
+'@
+$hoverWindow=[NavHover]::Place($hwnd)
 $long='P15 workspace full truncated name — alpha beta gamma delta epsilon zeta eta theta'
 $null=Rpc 'workspace.rename' @{name=$long} $first
 $null=Rpc 'sidebar' @{op='width';width=160}
@@ -277,7 +306,7 @@ $baseline=NavPixels 'tooltip-before'
 Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class NavDpi { [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); }'
 $dpiScale=[NavDpi]::GetDpiForWindow($hwnd)/96.0
 $x=[int](40*$dpiScale);$y=[int](50*$dpiScale)
-[void][HudOwnedJob]::SendMessageW($hwnd,0x200,[IntPtr]::Zero,[IntPtr](($y-shl 16)-bor $x))
+[NavHover]::Move($hwnd,$x,$y)
 Start-Sleep -Milliseconds 650
 $tip=NavPixels 'tooltip-long-workspace'
 Check 'truncated workspace name paints a tooltip' ((PixelDifference $baseline $tip)-gt 150)
@@ -286,7 +315,7 @@ $gone=NavPixels 'tooltip-left'
 Check 'mouse leave clears tooltip' ((PixelDifference $tip $gone)-gt 150)
 $null=Rpc 'workspace.rename' @{name='short'} $first
 $short=NavPixels 'tooltip-short-before'
-[void][HudOwnedJob]::SendMessageW($hwnd,0x200,[IntPtr]::Zero,[IntPtr](($y-shl 16)-bor $x))
+[NavHover]::Move($hwnd,$x,$y)
 Start-Sleep -Milliseconds 650
 $shortAfter=NavPixels 'tooltip-short-after'
 Check 'untruncated name does not paint a tooltip' ((PixelDifference $short $shortAfter)-eq 0)
@@ -297,7 +326,7 @@ $null=Rpc 'sidebar' @{op='mode:flagged'}
 $sessionBefore=NavPixels 'tooltip-session-before'
 $rowDip=[Math]::Max($metrics.cellHeight/$dpiScale+8,24)
 $sy=[int]((50+$rowDip)*$dpiScale)
-[void][HudOwnedJob]::SendMessageW($hwnd,0x200,[IntPtr]::Zero,[IntPtr](($sy-shl 16)-bor $x))
+[NavHover]::Move($hwnd,$x,$sy)
 Start-Sleep -Milliseconds 650
 $sessionTip=NavPixels 'tooltip-session-flagged'
 Check 'flagged session truncated name paints tooltip' ((PixelDifference $sessionBefore $sessionTip)-gt 150)
@@ -306,6 +335,7 @@ $renamed=NavPixels 'tooltip-session-renamed'
 [void][HudOwnedJob]::SendMessageW($hwnd,0x2a3,[IntPtr]::Zero,[IntPtr]::Zero)
 $renamedLeft=NavPixels 'tooltip-session-renamed-left'
 Check 'renaming hovered row invalidates tooltip without a move' ((PixelDifference $renamed $renamedLeft)-eq 0)
+[NavHover]::Restore($hwnd,$hoverWindow)
 $null=Rpc 'sidebar' @{op='mode:tree'}
 $null=Rpc 'session.type' @{text="exit`r"} $session
 Check 'exited shell does not retain shell-name hint' (NavWait {$null-eq (Node $session).foregroundShell})
