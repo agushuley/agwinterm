@@ -382,6 +382,7 @@ internal partial class Program
                     if (_kittyAteChar) { _kittyAteChar = false; return IntPtr.Zero; }   // OnKeyDown already CSI-u-encoded this key
                     if (_menuAteChar || _menuLevels.Count > 0 || _menuBarFocus >= 0) { _menuAteChar = false; return IntPtr.Zero; }   // the menu's key-down made this char (MenuBar.cs)
                     if (CloseExitedOverlayOnKey()) return IntPtr.Zero;   // the any-key close of an exited --wait overlay (cover, else the focused pane's — P5)
+                    if ((int)c == 13 && TryCloseExitHoldOnEnter()) return IntPtr.Zero;
                     if (_setOpen)
                     {
                         if (_ddRow is not null && c >= 0x20 && c != 0x7f) { _ddQuery += c; FilterDropdown(); RequestRedraw(); }

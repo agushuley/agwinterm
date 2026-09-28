@@ -348,6 +348,7 @@ internal partial class Program : ISessionHost, IWindowHost
         public bool ReadOnly;      // block keyboard input to this pane (protect a running agent from stray keys)
         public bool ProfileShell; // profile/login shell, not a session new --command pane
         public int? ProfileExitCode; // ended profile shell; independent of agent status
+        public bool AwaitingExitAck; // hold prompt is visible; Enter may close this session
         // Text selection (absolute line index: [0..HistoryCount) history, then the live grid rows).
         public bool HasSel;
         public int SelAncLine, SelAncCol, SelFocLine, SelFocCol;
