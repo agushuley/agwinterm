@@ -52,6 +52,10 @@
   marks with jump-to-prompt, taskbar progress (OSC 9;4).
 - Shells are launched with `TERM_PROGRAM=agwinterm` (plus the usual `AGWINTERM_*` variables), so prompt
   engines, tmux and scripts can detect the host terminal.
+- When a **normal profile / login-shell** tab’s process exits, its exit code appears in the session's
+  accessible name and unread badge tooltip. A background exit sends an `ok` notification for code 0 or
+  `attention` for a non-zero code. The exited shell remains visible; tabs started with
+  `session new --command` are unchanged.
 
 ## Accessible — screen readers are first-class
 
