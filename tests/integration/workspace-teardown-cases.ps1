@@ -10,7 +10,14 @@ foreach($deleteActive in $false,$true){
         $doomed=[string](Rpc 'session.new' @{name='teardown-split'})
         if(-not (NavWait {$null-ne (Node $doomed)})){throw 'Doomed session did not materialize'}
         $right=[string](Rpc 'session.split' @{op='on'} $doomed)
-        if(-not (NavWait {(Node $doomed).foregroundShells.Count-eq 2 -and @((Node $doomed).foregroundShells|Where-Object {$_-ne 'cmd'}).Count-eq 0})){throw 'Split shells not ready'}
+        # Foreground-shell hints can be null while a live cmd has children; the owned job has the exact process set.
+        $splitReady=NavWait {
+            $node=Node $doomed
+            if($null-eq $node -or $node.paneCount-ne 2 -or @($node.paneIds).Count-ne 2 -or $node.paneIds[1]-ne $right){return $false}
+            $ownedCmds=@($job.MemberIds()|Where-Object {$_-notin $survivorIds}|ForEach-Object {Get-Process -Id $_ -ErrorAction SilentlyContinue}|Where-Object ProcessName -eq 'cmd')
+            $ownedCmds.Count-eq 2
+        }
+        if(-not $splitReady){throw "Split shells not ready: node=$((Node $doomed)|ConvertTo-Json -Compress -Depth 5) members=$($job.Members())"}
         $null=Rpc 'session.scratch' @{op='on'} $doomed
         $null=Rpc 'config.set' @{key='cursor-blink';value='false'} -NoTarget # waits behind scratch creation
         if(-not (NavWait {([string](Rpc 'session.text' @{})).Contains('>')})){throw 'Scratch shell not ready'}
