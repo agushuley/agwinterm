@@ -1,0 +1,20 @@
+# Portable agwinterm (single-file win-x64) without a host .NET SDK.
+# Cross-compiles net10.0-windows from the Linux SDK image (EnableWindowsTargeting).
+FROM mcr.microsoft.com/dotnet/sdk:10.0.301-noble
+
+WORKDIR /repo
+ENV DOTNET_EnableWindowsTargeting=true \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+
+COPY global.json Agwinterm.slnx ./
+COPY src/ src/
+COPY themes/ themes/
+COPY installer/agwinterm.iss installer/agwinterm.iss
+COPY docker/build-portable-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ARG GIT_SHA
+ENV GIT_SHA=${GIT_SHA}
+
+ENTRYPOINT ["/entrypoint.sh"]

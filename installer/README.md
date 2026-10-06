@@ -19,8 +19,10 @@ and `agwinterm-ptyhost.exe` load it from their own directory, and fall back to t
 ## Build
 
 ```powershell
-installer\build.ps1        # both setups (what CI/releases run)
-installer\build-lite.ps1   # lite setup only — skips the .NET publish, handy when iterating on lite
+installer\build-portable-docker.ps1  # portable single-file exe via Docker (no host SDK); see ../../docs/local-build.md
+installer\build-portable.ps1         # same portable exe when a .NET 10 SDK is available on the host
+installer\build.ps1                  # both setups (what CI/releases run)
+installer\build-lite.ps1             # lite setup only — skips the .NET publish, handy when iterating on lite
 ```
 
 Prereqs:
