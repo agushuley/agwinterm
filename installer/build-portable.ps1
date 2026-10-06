@@ -1,5 +1,5 @@
 # Build the PORTABLE agwinterm: one self-contained single-file exe, no installer needed.
-# Output: installer\Output\agwinterm-portable-<ver>-win-x64.exe
+# Output: installer\Output\agwinterm-portable-<ver>-g<sha>-win-x64.exe
 # Themes + the window icon are embedded in the assembly (see Agwinterm.Win32.csproj), so the
 # bare exe runs from anywhere. Settings still live under %LOCALAPPDATA%\agwinterm.
 $ErrorActionPreference = "Stop"
@@ -13,6 +13,8 @@ $outDir = Join-Path $here "Output"
 $iss = Get-Content (Join-Path $here "agwinterm.iss") -Raw
 if ($iss -notmatch '#define\s+AppVersion\s+"([^"]+)"') { throw "AppVersion not found in agwinterm.iss" }
 $ver = $Matches[1]
+$sha = (& git -C $root rev-parse --short HEAD).Trim()
+if ([string]::IsNullOrWhiteSpace($sha)) { throw "git rev-parse --short HEAD failed (build from a git checkout)" }
 
 Write-Host "== clean stage ==" -ForegroundColor Cyan
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
@@ -35,7 +37,9 @@ if (-not (Test-Path $exe)) { throw "publish produced no Agwinterm.Win32.exe" }
 
 # Ship ONLY the exe — themes/assets land next to it in the stage as loose copies, but the
 # embedded fallbacks make the bare exe self-sufficient.
-$dst = Join-Path $outDir "agwinterm-portable-$ver-win-x64.exe"
+$portableName = "agwinterm-portable-$ver-g$sha-win-x64.exe"
+$shortName = "agwinterm-$ver-g$sha-win-x64.exe"
+$dst = Join-Path $outDir $portableName
 Copy-Item $exe $dst -Force
 Write-Host ("== done: {0} ({1:N1} MB) ==" -f $dst, ((Get-Item $dst).Length/1MB)) -ForegroundColor Green
 
@@ -43,9 +47,10 @@ Write-Host ("== done: {0} ({1:N1} MB) ==" -f $dst, ((Get-Item $dst).Length/1MB))
 # artifacts under installer\Output, so it must not create an untracked workspace copy.
 if (-not $env:GITHUB_ACTIONS) {
   $releasesDir = Join-Path (Split-Path -Parent $root) "releases"
-  $localArtifact = Join-Path $releasesDir (Split-Path -Leaf $dst)
-  if (Test-Path $localArtifact) { throw "local release artifact already exists: $localArtifact" }
   New-Item -ItemType Directory -Force $releasesDir | Out-Null
-  Copy-Item $dst $localArtifact
-  Write-Host ("== local release: {0} ==" -f $localArtifact) -ForegroundColor Green
+  foreach ($name in @($portableName, $shortName)) {
+    $localArtifact = Join-Path $releasesDir $name
+    Copy-Item $dst $localArtifact -Force
+    Write-Host ("== local release: {0} ==" -f $localArtifact) -ForegroundColor Green
+  }
 }
