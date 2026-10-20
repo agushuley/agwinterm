@@ -88,7 +88,7 @@ internal static class Win32
     public const int EC_LEFTMARGIN = 0x0001, EC_RIGHTMARGIN = 0x0002;
     public const int EN_KILLFOCUS = 0x0200;
     public const uint WS_CHILD = 0x40000000, ES_AUTOHSCROLL = 0x0080;
-    public const uint ES_MULTILINE = 0x0004, ES_READONLY = 0x0800, WS_CLIPSIBLINGS = 0x04000000;
+    public const uint ES_MULTILINE = 0x0004, ES_READONLY = 0x0800, WS_CLIPSIBLINGS = 0x04000000, WS_CLIPCHILDREN = 0x02000000;
     public const int GWLP_WNDPROC = -4;
     public const int DEFAULT_GUI_FONT = 17;
     public const uint CS_DBLCLKS = 0x0008;

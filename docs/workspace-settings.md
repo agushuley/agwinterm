@@ -10,7 +10,9 @@ falls back to the application's new-session-directory mode.
 
 Application-wide environment variables are edited directly in **Settings → Environment**.
 Both editors use the same themed panel and validate before **Apply**. Workspace drafts are shared
-between its tabs. **Cancel**, Escape, or closing the panel discards changes not yet applied.
+between its tabs. Global **Apply** is disabled until the text changes and becomes disabled again
+after saving; global Settings has no Cancel button. Escape or closing the panel discards unapplied
+environment edits. Workspace Settings also provides **Cancel** to discard its unapplied drafts.
 Existing sessions are not restarted. Directory defaults are edited only in Workspace Settings,
 not through duplicate Set/Clear actions in the workspace menu.
 Shell profiles keep their existing `env` object in `profiles.json`; there is no new profile/session editor.

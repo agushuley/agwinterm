@@ -29,6 +29,7 @@ internal partial class Program
         public string[] Opts = Array.Empty<string>();
         public string[] Vals = Array.Empty<string>();
         public Action? OnClick;
+        public Func<bool>? Enabled;
         public Func<string>? ReadValue;
         public Action<string>? WriteValue;
         public bool Multiline, Footer;
@@ -57,7 +58,8 @@ internal partial class Program
     private static bool Interactive(SW k) =>
         k is SW.Toggle or SW.Slider or SW.Dropdown or SW.Color or SW.Sound or SW.Path or SW.Button or SW.Profile or SW.Text;
     private bool RowInSettingsTab(SetRow row) => row.Tab < 0 || row.Tab == _setTab;
-    private List<SetRow> FocusableRows() => _setRows.FindAll(r => RowInSettingsTab(r) && Interactive(r.Kind));
+    private static bool SettingsRowEnabled(SetRow row) => row.Enabled?.Invoke() != false;
+    private List<SetRow> FocusableRows(bool includeDisabled = false) => _setRows.FindAll(r => RowInSettingsTab(r) && Interactive(r.Kind) && (includeDisabled || SettingsRowEnabled(r)));
     private readonly float[] _navHit = new float[SetTabNames.Length * 2];
     private Rect _setCard;
     private float _setCloseX0, _setCloseY0, _setCloseX1, _setCloseY1;
@@ -340,9 +342,9 @@ internal partial class Program
             float buttonX = lblX, buttonY = cardY + cardH - 42f;
             foreach (var row in _setRows.Where(row => row.Footer && RowInSettingsTab(row)))
             {
-                DrawPanelButton(rt, brush, buttonX, buttonY, 96f, 28f, row.Label);
+                DrawPanelButton(rt, brush, buttonX, buttonY, 96f, 28f, row.Label, SettingsRowEnabled(row));
                 row.Hx0 = buttonX; row.Hx1 = buttonX + 96f; row.Hy0 = buttonY; row.Hy1 = buttonY + 28f; row.Vis = true;
-                if (_setFocusKb && _setNav < 0 && ReferenceEquals(row, _setFocus))
+                if (_setFocusKb && _setNav < 0 && ReferenceEquals(row, _setFocus) && SettingsRowEnabled(row))
                 {
                     brush.Color = ChromeText;
                     rt.DrawRectangle(new Rect(buttonX - 2f, buttonY - 2f, 100f, 32f), brush, 1.5f, FocusStroke(rt));
@@ -507,13 +509,13 @@ internal partial class Program
         }
     }
 
-    private void DrawPanelButton(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, float x, float y, float w, float h, string label)
+    private void DrawPanelButton(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, float x, float y, float w, float h, string label, bool enabled = true)
     {
-        brush.Color = Mix(PalBg, ChromeText, 0.14f);
+        brush.Color = Mix(PalBg, ChromeText, enabled ? 0.14f : 0.05f);
         rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(x, y, w, h), RadiusX = 6f, RadiusY = 6f }, brush);
         brush.Color = PalBorder;
         rt.DrawRoundedRectangle(new RoundedRectangle { Rect = new Rect(x, y, w, h), RadiusX = 6f, RadiusY = 6f }, brush, 1f);
-        brush.Color = ChromeText;
+        brush.Color = enabled ? ChromeText : ChromeDim;
         // Centered format: the leading-aligned _uiSmall put the label flush against the button's left
         // edge (the width budget's padding all landed on the right).
         rt.DrawText(label, _uiSmallCenter, new Rect(x, y, w, h), brush);
@@ -656,7 +658,7 @@ internal partial class Program
         if (my < _setPaneTop || my > _setCard.Bottom - 6f) return;
         foreach (var r in _setRows)
         {
-            if (!RowInSettingsTab(r)) continue;
+            if (!RowInSettingsTab(r) || !SettingsRowEnabled(r)) continue;
             if (r.Vis && r.Kind == SW.Path && Hit(r.Bx0, r.By0, r.Bx1, r.By1, mx, my))
             { BrowseSettingsDirectory(r); return; }
             if (!r.Vis || !Hit(r.Hx0, r.Hy0, r.Hx1, r.Hy1, mx, my)) continue;
@@ -865,7 +867,7 @@ internal partial class Program
     private void ActivateSetFocus()
     {
         var r = _setFocus;
-        if (r is null) return;
+        if (r is null || !SettingsRowEnabled(r)) return;
         switch (r.Kind)
         {
             case SW.Text: if (r.Edit != IntPtr.Zero) SetFocus(r.Edit); break;

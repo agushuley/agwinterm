@@ -109,7 +109,10 @@ internal partial class Program
     {
         var text = new StringBuilder(GetWindowTextLengthW(row.Edit) + 1);
         GetWindowTextW(row.Edit, text, text.Capacity);
+        if (row.Text == text.ToString()) return;
         row.Text = text.ToString(); row.WriteValue?.Invoke(row.Text);
+        if (_settingsWorkspace is null) { _settingsMessage = ""; _settingsFailed = false; }
+        RequestRedraw();
     }
 
     private IntPtr SettingsTextColor(IntPtr context)

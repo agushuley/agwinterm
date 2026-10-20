@@ -10,6 +10,11 @@ public static class WorkspaceSettingsProbe {
     private delegate bool Visitor(IntPtr window, IntPtr data);
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct GuiInfo {
+        public int Size, Flags;
+        public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+        public Rect CaretRect;
+    }
     [DllImport("user32.dll")] private static extern bool EnumWindows(Visitor visitor, IntPtr data);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, Visitor visitor, IntPtr data);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
@@ -20,6 +25,17 @@ public static class WorkspaceSettingsProbe {
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr context, uint flags);
+    [DllImport("user32.dll")] public static extern bool InvalidateRect(IntPtr window, IntPtr rect, bool erase);
+    [DllImport("user32.dll")] public static extern bool UpdateWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool GetUpdateRect(IntPtr window, out Rect rect, bool erase);
+    [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
+    [DllImport("dwmapi.dll")] public static extern int DwmFlush();
+    public static bool EditingCaret(IntPtr window) {
+        var info = new GuiInfo { Size = Marshal.SizeOf<GuiInfo>() };
+        uint thread = GetWindowThreadProcessId(window, out _);
+        return GetGUIThreadInfo(thread, ref info) && info.Focus == window && info.Caret == window &&
+            (info.Flags & 1) != 0 && info.CaretRect.Right > info.CaretRect.Left && info.CaretRect.Bottom > info.CaretRect.Top;
+    }
     [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr key, IntPtr detail);
     [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageW")] public static extern IntPtr SendText(IntPtr window, uint message, IntPtr key, string text);
     [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageW")] private static extern IntPtr ReadText(IntPtr window, uint message, IntPtr key, StringBuilder text);
@@ -90,6 +106,20 @@ function Settings-Shot([string]$Name, [IntPtr]$Handle = $settingsOwner) {
     finally { $bitmap.Dispose() }
 }
 
+function Settings-EditorPixels([IntPtr]$Handle) {
+    $rect = [WorkspaceSettingsProbe+Rect]::new()
+    $null = [WorkspaceSettingsProbe]::GetWindowRect($Handle, [ref]$rect)
+    $null = [WorkspaceSettingsProbe]::DwmFlush()
+    $bitmap = [Drawing.Bitmap]::new(160, 12)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $stream = [IO.MemoryStream]::new()
+    try {
+        $graphics.CopyFromScreen($rect.Left + 4, $rect.Top + 4, 0, 0, $bitmap.Size)
+        $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+        return [Convert]::ToBase64String($stream.ToArray())
+    } finally { $stream.Dispose(); $graphics.Dispose(); $bitmap.Dispose() }
+}
+
 $settingsOwner = [IntPtr]::Zero
 if (-not (Wait-SettingsUi {
     $script:settingsOwner = [WorkspaceSettingsProbe]::Window([uint32]$process.Id, 'AgwintermWin32')
@@ -105,9 +135,29 @@ try {
     $null = Invoke-Api 'settings.open'
     Invoke-SettingsNode 'Environment tab'
     Check 'global Environment tab hosts one inline editor' (Wait-SettingsUi { @([WorkspaceSettingsProbe]::Edits($settingsOwner)).Count -eq 1 })
+    Check 'global Apply starts disabled and there is no Cancel button' (Wait-SettingsUi {
+        $apply = Settings-Node 'Apply'
+        $null -ne $apply -and -not $apply.Current.IsEnabled -and $null -eq (Settings-Node 'Cancel')
+    })
     Check 'environment editing does not open a separate window' ([WorkspaceSettingsProbe]::Window([uint32]$process.Id, 'Agwinterm.EnvironmentSettings') -eq [IntPtr]::Zero)
     $environmentEdit = @([WorkspaceSettingsProbe]::Edits($settingsOwner))[0]
     [WorkspaceSettingsProbe]::SetText($environmentEdit, "TOKEN<<END`r`nabc=def`r`nbcd=`r`nqw=`r`nEND`r`nROOT=C:\new\tools`r`n")
+    Check 'editing global variables enables Apply' (Wait-SettingsUi { (Settings-Node 'Apply').Current.IsEnabled })
+    Invoke-SettingsNode 'Variables for new processes'
+    Check 'inline environment editor owns a visible text caret' (Wait-SettingsUi { [WorkspaceSettingsProbe]::EditingCaret($environmentEdit) })
+    $null = [WorkspaceSettingsProbe]::UpdateWindow($environmentEdit)
+    $editorPixels = Settings-EditorPixels $environmentEdit
+    $editorStable = $true
+    for ($frame = 0; $frame -lt 40; $frame++) {
+        $null = [WorkspaceSettingsProbe]::UpdateWindow($environmentEdit)
+        $null = [WorkspaceSettingsProbe]::InvalidateRect($settingsOwner, [IntPtr]::Zero, $false)
+        $updateRect = [WorkspaceSettingsProbe+Rect]::new()
+        if ([WorkspaceSettingsProbe]::GetUpdateRect($environmentEdit, [ref]$updateRect, $false)) { $editorStable = $false }
+        $null = [WorkspaceSettingsProbe]::UpdateWindow($settingsOwner)
+        if (-not [WorkspaceSettingsProbe]::EditingCaret($environmentEdit)) { $editorStable = $false }
+        if ((Settings-EditorPixels $environmentEdit) -cne $editorPixels) { $editorStable = $false }
+    }
+    Check 'repeated parent repaints do not invalidate the editor or lose its caret' $editorStable
     Settings-Shot 'themed-environment'
     Invoke-SettingsNode 'General tab'
     Check 'environment editor hides when switching tabs' (Wait-SettingsUi { @([WorkspaceSettingsProbe]::Edits($settingsOwner)).Count -eq 0 })
@@ -115,11 +165,18 @@ try {
     Check 'environment draft survives tab switching' (Wait-SettingsUi { @([WorkspaceSettingsProbe]::Edits($settingsOwner)).Count -eq 1 -and [WorkspaceSettingsProbe]::Text(@([WorkspaceSettingsProbe]::Edits($settingsOwner))[0]).Contains('qw=') })
     Invoke-SettingsNode 'Apply'
     Check 'inline global editor saves literal multiline values' (Wait-SettingsUi { (Invoke-Api 'environment.get').result.env.TOKEN -ceq "abc=def`nbcd=`nqw=" })
+    Check 'successful global Apply disables the button' (Wait-SettingsUi { -not (Settings-Node 'Apply').Current.IsEnabled })
+    $savedEnvironmentText = [WorkspaceSettingsProbe]::Text(@([WorkspaceSettingsProbe]::Edits($settingsOwner))[0])
+    [WorkspaceSettingsProbe]::SetText(@([WorkspaceSettingsProbe]::Edits($settingsOwner))[0], 'TOKEN=changed')
+    Check 'editing after global Apply enables the button again' (Wait-SettingsUi { (Settings-Node 'Apply').Current.IsEnabled })
+    [WorkspaceSettingsProbe]::SetText(@([WorkspaceSettingsProbe]::Edits($settingsOwner))[0], $savedEnvironmentText)
+    Check 'reverting global text to saved contents disables Apply' (Wait-SettingsUi { -not (Settings-Node 'Apply').Current.IsEnabled })
     [WorkspaceSettingsProbe]::SetText(@([WorkspaceSettingsProbe]::Edits($settingsOwner))[0], "TOKEN=first`r`ntoken=duplicate")
     Invoke-SettingsNode 'Apply'
     Check 'invalid inline text does not overwrite global values' ((Invoke-Api 'environment.get').result.env.TOKEN -ceq "abc=def`nbcd=`nqw=")
-    Invoke-SettingsNode 'Cancel'
-    Check 'Cancel destroys the inline edit controls' (Wait-SettingsUi { @([WorkspaceSettingsProbe]::Edits($settingsOwner)).Count -eq 0 })
+    Check 'failed validation keeps global Apply enabled' (Wait-SettingsUi { (Settings-Node 'Apply').Current.IsEnabled })
+    [WorkspaceSettingsProbe]::Key(@([WorkspaceSettingsProbe]::Edits($settingsOwner))[0], 27)
+    Check 'Escape destroys the inline edit controls' (Wait-SettingsUi { @([WorkspaceSettingsProbe]::Edits($settingsOwner)).Count -eq 0 })
 
     $null = Invoke-Api 'settings.open'
     Invoke-SettingsNode 'Environment tab'

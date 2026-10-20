@@ -690,12 +690,12 @@ internal partial class Program : ISessionHost, IWindowHost
         if (_geoValid) ClampGeoToVisibleScreen(ref _geoX, ref _geoY, ref _geoW, ref _geoH);
         _creating = this;                    // so the WindowProc trampoline can resolve us during CreateWindowExW
         _hwnd = _isQuickWindow
-            ? CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, ClassName, "agwinterm quick terminal", WS_POPUP,
+            ? CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, ClassName, "agwinterm quick terminal", WS_POPUP | WS_CLIPCHILDREN,
                 0, 0, 640, 480, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero)
             : _geoValid
-            ? CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW,
+            ? CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 _geoX, _geoY, _geoW, _geoH, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero)
-            : CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW,
+            : CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 CW_USEDEFAULT, CW_USEDEFAULT, 1040, 660, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
         _creating = null;
         if (_hwnd == IntPtr.Zero)
@@ -977,7 +977,7 @@ internal partial class Program : ISessionHost, IWindowHost
                     Rect = ScreenRect(_setCard.Left + 8f, _navHit[i * 2], SetNavW - 16f, _navHit[i * 2 + 1] - _navHit[i * 2]),
                 });
             }
-            var srows = FocusableRows();
+            var srows = FocusableRows(includeDisabled: true);
             for (int i = 0; i < srows.Count; i++)
             {
                 var r = srows[i];
@@ -988,6 +988,7 @@ internal partial class Program : ISessionHost, IWindowHost
                     Index = r.UiaIdentity,
                     Parent = grp,
                     Name = SettingsControlName(r),
+                    Enabled = SettingsRowEnabled(r),
                     Focused = _setNav < 0 && ReferenceEquals(r, _setFocus),
                     Rect = r.Vis ? ScreenRect(r.Hx0, r.Hy0, Math.Max(1, r.Hx1 - r.Hx0), Math.Max(1, r.Hy1 - r.Hy0)) : default,
                 });

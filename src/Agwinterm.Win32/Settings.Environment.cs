@@ -8,6 +8,7 @@ internal partial class Program
     private Workspace? _settingsWorkspace;
     private string _settingsName = "", _settingsDirectory = "", _settingsProfile = "", _settingsEnvironment = "", _settingsMessage = "";
     private bool _settingsFailed;
+    private string _settingsSavedEnvironment = "";
     private IReadOnlyDictionary<string, string> _settingsOriginalEnv = EnvironmentOverrides.Empty;
 
     private void BeginEnvironmentEditing(Workspace? workspace)
@@ -18,6 +19,7 @@ internal partial class Program
         _settingsProfile = workspace?.Options.DefaultProfile ?? "";
         _settingsOriginalEnv = workspace is null ? ReadGlobalEnvironment() : workspace.Options.Env ?? EnvironmentOverrides.Empty;
         _settingsEnvironment = EnvironmentOverrides.FormatEditor(_settingsOriginalEnv);
+        _settingsSavedEnvironment = _settingsEnvironment;
         _settingsMessage = ""; _settingsFailed = false;
     }
 
@@ -76,8 +78,13 @@ internal partial class Program
             Text = _settingsEnvironment, WriteValue = value => _settingsEnvironment = value
         });
         int footerTab = _settingsWorkspace is null ? tab : -1;
-        _setRows.Add(new SetRow { Kind = SW.Button, Tab = footerTab, Label = "Apply", Footer = true, OnClick = ApplyEnvironmentSettings });
-        _setRows.Add(new SetRow { Kind = SW.Button, Tab = footerTab, Label = "Cancel", Footer = true, OnClick = CloseSettings });
+        _setRows.Add(new SetRow
+        {
+            Kind = SW.Button, Tab = footerTab, Label = "Apply", Footer = true, OnClick = ApplyEnvironmentSettings,
+            Enabled = () => _settingsWorkspace is not null || _settingsEnvironment != _settingsSavedEnvironment
+        });
+        if (_settingsWorkspace is not null)
+            _setRows.Add(new SetRow { Kind = SW.Button, Tab = footerTab, Label = "Cancel", Footer = true, OnClick = CloseSettings });
     }
 
     private void ApplyEnvironmentSettings()
@@ -107,6 +114,7 @@ internal partial class Program
                 SaveState(); EmitEvent("tree");
             }
             _settingsOriginalEnv = environment;
+            _settingsSavedEnvironment = _settingsEnvironment;
             _settingsMessage = "Saved. Applies to new processes only."; _settingsFailed = false;
         }
         catch (Exception error) when (error is FormatException or IOException or UnauthorizedAccessException or ArgumentException)
