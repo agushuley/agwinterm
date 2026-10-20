@@ -268,9 +268,10 @@ public sealed class ControlServer : IDisposable
                     string? commandMode = GetString(args, "command-mode");
                     if (!SessionCommand.TryCreate(GetString(args, "command"), commandMode, GetBool(args, "wait"),
                         GetString(args, "profile"), out _, out var commandError)) return Err(commandError);
-                    string created = host.NewSession(GetString(args, "name"), GetString(args, "cwd"), workspace,
+                    var sessionEnv = args.TryGetProperty("env", out var sessionEnvValue) ? EnvironmentOverrides.ReadJson(sessionEnvValue) : null;
+                    string created = host.NewSession(new SessionCreateRequest(GetString(args, "name"), GetString(args, "cwd"), workspace,
                         GetString(args, "command"), workspaceName, GetBool(args, "create-workspace"), GetString(args, "profile"), GetBool(args, "no-select"), GetBool(args, "wait"),
-                        caller: GetString(args, "caller"), commandMode: commandMode);
+                        Caller: GetString(args, "caller"), CommandMode: commandMode, Env: sessionEnv));
                     return created.StartsWith(ISessionHost.RefusePrefix, StringComparison.Ordinal)
                         ? Err(created[ISessionHost.RefusePrefix.Length..])
                         : Ok(created);
@@ -285,9 +286,29 @@ public sealed class ControlServer : IDisposable
                         string? wsDefault = GetString(args, WorkspaceDefaultDirs.Key) ?? GetString(args, "default-dir");
                         if (wsDefault is not null && WorkspaceDefaultDirs.ValidateSet(wsDefault) is { } wsDefErr) return Err(wsDefErr);
                         string? normalized = wsDefault is null ? null : WorkspaceDefaultDirs.NormalizeSet(wsDefault);
-                        return Ok(host.NewWorkspace(GetString(args, "name"), normalized));
+                        var workspaceEnv = args.TryGetProperty("env", out var workspaceEnvValue) ? EnvironmentOverrides.ReadJson(workspaceEnvValue) : null;
+                        string created = host.NewWorkspace(GetString(args, "name"), new WorkspaceOptions(normalized, SettingsString(args, "defaultProfile"), workspaceEnv));
+                        return created.StartsWith(ISessionHost.RefusePrefix, StringComparison.Ordinal)
+                            ? Err(created[ISessionHost.RefusePrefix.Length..]) : Ok(created);
                     }
                 case "workspace.default-dir": return HandleWorkspaceDefaultDir(host, target, args);
+                case "workspace.settings":
+                    {
+                        WorkspaceOptions? options = null;
+                        if (args.TryGetProperty("settings", out var settings))
+                        {
+                            if (settings.ValueKind != JsonValueKind.Object) return Err("settings must be an object");
+                            string? directory = SettingsString(settings, "defaultDir");
+                            if (directory is not null && WorkspaceDefaultDirs.ValidateSet(directory) is { } invalid) return Err(invalid);
+                            options = new WorkspaceOptions(directory is null ? null : WorkspaceDefaultDirs.NormalizeSet(directory),
+                                SettingsString(settings, "defaultProfile"), settings.TryGetProperty("env", out var environment) ? EnvironmentOverrides.ReadJson(environment) : null);
+                        }
+                        return SettingsReply(host.WorkspaceSettings(target, options));
+                    }
+                case "environment.get": return SettingsReply(host.EnvironmentGet(SettingsString(args, "scope") ?? "global", target));
+                case "environment.set":
+                    if (!args.TryGetProperty("env", out var envValue)) return Err("env is required; use {} to clear overrides");
+                    return SettingsReply(host.EnvironmentSet(SettingsString(args, "scope") ?? "global", target, EnvironmentOverrides.ReadJson(envValue)));
                 case "font": return host.SetFontSize(target, GetString(args, "op") ?? "") ? Ok("font") : Err("session not found");
                 case "dashboard": return host.Dashboard(GetBool(args, "close"), GetString(args, "ids"), GetInt(args, "font-size", 0)) ? Ok("dashboard") : Err("dashboard unavailable");
 
@@ -790,6 +811,16 @@ public sealed class ControlServer : IDisposable
             ? Err(reply[ISessionHost.RefusePrefix.Length..])
             : OkRaw(reply);
     }
+
+    private static string? SettingsString(JsonElement settings, string key)
+    {
+        if (!settings.TryGetProperty(key, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        if (value.ValueKind != JsonValueKind.String) throw new FormatException(key + " must be a string or null");
+        return value.GetString();
+    }
+
+    private static string SettingsReply(string reply) => reply.StartsWith(ISessionHost.RefusePrefix, StringComparison.Ordinal)
+        ? Err(reply[ISessionHost.RefusePrefix.Length..]) : OkRaw(reply);
 
     private static string HandleWorkspaceDefaultDir(ISessionHost host, string? target, JsonElement args)
     {

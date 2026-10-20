@@ -99,6 +99,7 @@ internal partial class Program
                 }
 
             case WM_COMMAND:
+                if (SettingsTextChanged(lParam, HiWord(wParam))) return IntPtr.Zero;
                 if (LoWord(wParam) == EDIT_ID && HiWord(wParam) == EN_KILLFOCUS) CommitRename();
                 return IntPtr.Zero;
 
@@ -110,6 +111,7 @@ internal partial class Program
                 break;
 
             case WM_CTLCOLOREDIT: // highlight-matching background + white text (wParam = HDC)
+                if (_setRows.Any(row => row.Edit != IntPtr.Zero && row.Edit == lParam)) return SettingsTextColor(wParam);
                 SetTextColor(wParam, RGB(255, 255, 255));
                 SetBkColor(wParam, RGB(41, 51, 64));
                 return _editBrush;
@@ -680,6 +682,7 @@ internal partial class Program
                 return DefWindowProcW(hwnd, msg, wParam, lParam);
 
             case WM_DESTROY:
+                DestroySettingsTextControls();
                 _uia.Dispose();
                 CloseWindowPicker();
                 _uiGone.Cancel();                 // release any pipe thread waiting in InvokeOnUiQueued

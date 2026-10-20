@@ -103,6 +103,11 @@ jobs:
         timeout-minutes: 5
         run: ./tests/integration/hud-ui.ps1 -Suite Command -Strict
 
+      - name: Workspace settings and environment integration
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./tests/integration/workspace-settings.ps1
+
       - name: Passive HUD integration
         shell: pwsh
         timeout-minutes: 5

@@ -75,12 +75,20 @@ public sealed class SessionState
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Axis { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? Env { get; set; }
 }
 public sealed class WorkspaceState
 {
     public string Id { get; set; } = ""; public string Name { get; set; } = ""; public bool Expanded { get; set; } = true; public List<SessionState> Sessions { get; set; } = new();
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DefaultDir { get; set; }
+    public string? DefaultDir { get => Options.DefaultDir; set => Options = Options with { DefaultDir = value }; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultProfile { get => Options.DefaultProfile; set => Options = Options with { DefaultProfile = value }; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? Env { get => Options.Env; set => Options = Options with { Env = value }; }
+    [JsonIgnore]
+    public WorkspaceOptions Options { get; set; } = new();
 }
 public sealed class AppState
 {
@@ -120,7 +128,18 @@ public static class RestoreState
     /// </summary>
     public static bool TryDeserialize(string json, out AppState? state)
     {
-        try { state = JsonSerializer.Deserialize<AppState>(json, Json); return true; }
+        try
+        {
+            state = JsonSerializer.Deserialize<AppState>(json, Json);
+            if (state?.Workspaces is not null)
+                foreach (var workspace in state.Workspaces)
+                {
+                    if (workspace.Env is not null) workspace.Env = EnvironmentOverrides.Snapshot(workspace.Env);
+                    foreach (var session in workspace.Sessions ?? [])
+                        if (session.Env is not null) session.Env = EnvironmentOverrides.Snapshot(session.Env);
+                }
+            return true;
+        }
         catch { state = null; return false; }
     }
 

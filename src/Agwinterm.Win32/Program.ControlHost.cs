@@ -217,7 +217,7 @@ internal partial class Program
                                              .Select(t => OverlayPanes.Word(t.i)).ToList(), Hud: s.Hud,
                         ForegroundShells: s.Panes.Select(p => p.S.HasExited ? null : shells.GetValueOrDefault(p)).ToList());
                 }).ToList()
-            , Collapsed: !w.Expanded, DefaultDir: w.DefaultDir)).ToList();
+            , Collapsed: !w.Expanded, Options: w.Options)).ToList();
     }
 
     // Read-back snapshot: plain field reads + a Win32 query, safe from the pipe thread (worst case slightly stale).
@@ -298,10 +298,10 @@ internal partial class Program
     // ran `session new` (the CLI sends its AGWINTERM_SESSION_ID), so an agent gets sessions next to
     // itself however the user has clicked around meanwhile. Only a missing or stale caller reaches
     // the active workspace, and that too is read here, synchronously, rather than inside the Post.
-    public string NewSession(string? name, string? cwd, string? workspace, string? command = null,
-        string? workspaceName = null, bool createWorkspace = false, string? profile = null, bool noSelect = false, bool wait = false,
-        string? caller = null, string? commandMode = null)
+    public string NewSession(SessionCreateRequest request)
     {
+        var (name, cwd, workspace, command, workspaceName, createWorkspace, profile, noSelect, wait, caller, commandMode, env) = request;
+        env = env is null ? EnvironmentOverrides.Empty : EnvironmentOverrides.Snapshot(env);
         if (!SessionCommand.TryCreate(command, commandMode, wait, profile, out var launch, out var error))
             return ISessionHost.RefusePrefix + error;
         Workspace? ws = null;
@@ -363,7 +363,7 @@ internal partial class Program
                 target ??= CreateWorkspace(Guid.NewGuid().ToString(), newWorkspaceName!);
             }
             // --no-select creates the session in the background, leaving the current focus/selection (agterm #250).
-            CreateSession(id, name, cwd, target, makeActive: !noSelect, profileName: profile, sessionCommand: launch);
+            CreateSession(id, name, cwd, target, makeActive: !noSelect, profileName: profile, sessionCommand: launch, sessionEnv: env);
         });
         return id;
     }
@@ -384,21 +384,12 @@ internal partial class Program
         return true;
     }
 
-    public string NewWorkspace(string? name, string? defaultDir = null)
+    public string NewWorkspace(string? name, WorkspaceOptions? options = null)
     {
+        options = SnapshotWorkspaceOptions(options ?? new());
+        if (ValidateWorkspaceOptions(options) is { } error) return ISessionHost.RefusePrefix + error;
         string id = Guid.NewGuid().ToString();
-        PostVerb(() =>
-        {
-            var ws = CreateWorkspace(id, name);
-            if (!string.IsNullOrEmpty(defaultDir))
-            {
-                if (TrySetWorkspaceDefaultDir(ws, defaultDir, out _))
-                {
-                    SaveState();
-                    EmitEvent("tree");
-                }
-            }
-        });
+        PostVerb(() => CreateWorkspace(id, name, options));
         return id;
     }
 

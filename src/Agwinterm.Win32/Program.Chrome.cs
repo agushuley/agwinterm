@@ -483,31 +483,13 @@ internal partial class Program
         {
             bool wsFocused = _focusedWorkspaceId == cws.Id;
             int wsCount; lock (_workspaces) wsCount = _workspaces.Count;
+            A("Workspace Settings…", "", () => OpenWorkspaceSettings(cws));
+            A("New Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true));
             if (_profileCfg.Profiles.Count > 1)
                 foreach (var p in _profileCfg.Profiles)
                 { var nm = p.Name; A($"New Session — {nm}", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true, profileName: nm)); }
-            else A("New Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true));
             if (IsElevated()) A("New Non-Elevated Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true, deElevate: true));
             A("Open Directory…", "", () => { var d = PickFolder(); if (d is not null) CreateSession(Guid.NewGuid().ToString(), null, d, cws, true); });
-            A("Set Default Directory…", "", () =>
-            {
-                var d = PickFolder(cws.DefaultDir);
-                if (d is null) return;
-                if (!TrySetWorkspaceDefaultDir(cws, d, out _))
-                {
-                    ShowToast(WorkspaceDefaultDirs.NotDirectory);
-                    return;
-                }
-                SaveState();
-                ShowToast("Default directory: " + cws.DefaultDir);
-            });
-            if (!string.IsNullOrEmpty(cws.DefaultDir))
-                A("Clear Default Directory", "", () =>
-                {
-                    TrySetWorkspaceDefaultDir(cws, null, out _);
-                    SaveState();
-                    ShowToast("Default directory cleared");
-                });
             A("Rename", "", () => StartRename(cws));
             A(wsFocused ? "Unfocus" : "Focus", "", () => WorkspaceFocusOp(wsFocused ? "off" : "on", cws.Id));
             if (wsCount > 1) { list.Add(MenuSeparator()); A("Delete Workspace", "", () => DeleteWorkspace(cws)); }
