@@ -60,6 +60,24 @@ var rest = positionals.Skip(2).ToList();
 string? Opt(string k) => options.TryGetValue(k, out var v) ? v : null;
 string? DefaultTarget() => Opt("target") ?? Environment.GetEnvironmentVariable("AGWINTERM_SESSION_ID");
 
+bool ReadEnvironmentFile(string path, out JsonElement value)
+{
+    value = default;
+    try
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        if (document.RootElement.ValueKind != JsonValueKind.Object) throw new FormatException();
+        Agwinterm.Pty.EnvironmentOverrides.ReadJson(document.RootElement);
+        value = document.RootElement.Clone();
+        return true;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or FormatException)
+    {
+        Console.Error.WriteLine("Cannot read settings file: expected a readable JSON object with valid environment string values.");
+        return false;
+    }
+}
+
 string cmd;
 string? target = null;
 var cargs = new Dictionary<string, object?>();
@@ -70,6 +88,19 @@ bool printTextField = false;
 
 switch (area)
 {
+    case "environment":
+        if (sub is not ("get" or "set")) { Console.Error.WriteLine("environment requires get or set"); return 2; }
+        cmd = "environment." + sub;
+        string scope = Opt("scope") ?? "global";
+        cargs["scope"] = scope;
+        target = Opt("target") ?? (scope == "session" ? DefaultTarget() : null);
+        if (sub == "set")
+        {
+            if (Opt("file") is not { } envFile) { Console.Error.WriteLine("environment set requires --file <JSON file>"); return 2; }
+            if (!ReadEnvironmentFile(envFile, out var environment)) return 2;
+            cargs["env"] = environment;
+        }
+        break;
     case "ping": cmd = "ping"; break;
     case "version": cmd = "version"; break;   // handled locally, below: needs the resolved pipe name
     case "tree": cmd = "tree"; break;
@@ -99,7 +130,16 @@ switch (area)
                 if (Opt("name") is { } wsname) cargs["name"] = wsname;
                 else if (rest.Count > 0) cargs["name"] = rest[0];
                 if (Opt("default-dir") is { } wsdd) cargs["default-dir"] = wsdd;
+                if (Opt("default-profile") is { } wsProfile) cargs["defaultProfile"] = wsProfile;
+                if (Opt("env-file") is { } wsEnvFile)
+                {
+                    if (!ReadEnvironmentFile(wsEnvFile, out var wsEnvironment)) return 2;
+                    cargs["env"] = wsEnvironment;
+                }
                 target = null;
+                break;
+            case "settings":
+                cmd = "workspace.settings";
                 break;
             case "default-dir":
                 if (rest.Count > 0 && rest[0] == "clear")
@@ -198,6 +238,11 @@ switch (area)
                 if (Opt("workspace-name") is { } wsn) cargs["workspace-name"] = wsn;
                 if (options.ContainsKey("create-workspace")) cargs["create-workspace"] = true;
                 if (Opt("profile") is { } prof) cargs["profile"] = prof;
+                if (Opt("env-file") is { } sessionEnvFile)
+                {
+                    if (!ReadEnvironmentFile(sessionEnvFile, out var sessionEnvironment)) return 2;
+                    cargs["env"] = sessionEnvironment;
+                }
                 if (options.ContainsKey("no-select")) cargs["no-select"] = true;   // create in background, keep focus
                 if (options.ContainsKey("wait")) cargs["wait"] = true;             // PowerShell keeps its interactive prompt; direct mode refuses this flag
                 // Who is asking: the pane this CLI runs in, the same AGWINTERM_SESSION_ID every other

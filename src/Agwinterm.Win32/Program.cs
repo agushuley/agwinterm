@@ -395,6 +395,7 @@ internal partial class Program : ISessionHost, IWindowHost
         public string? CustomName; // user-renamed title (null = show the cwd/OSC title in the title bar, agterm-style)
         public string? Context;    // session.context: one line of "what is this pane for", set over the API (P3); drawn dimmed beside the name; persisted; null = none. Per session, not per pane — SessionContexts holds the rules.
         public string? ProfileName; // shell profile this session launched with (null = default; persisted)
+        public IReadOnlyDictionary<string, string> Env = EnvironmentOverrides.Empty;
         public Pane? Scratch;      // per-session scratch terminal (lazy; kept alive when hidden; not restored)
         // The SESSION-WIDE overlay slot (Wave B3): an ephemeral program run over the whole session —
         // every pane, and any pane overlay under it — shown as the kind-3 cover while the session is
@@ -420,7 +421,8 @@ internal partial class Program : ISessionHost, IWindowHost
         public required string Name;
         public readonly List<Ses> Sessions = new();
         public bool Expanded = true;
-        public string? DefaultDir;
+        public WorkspaceOptions Options = new();
+        public string? DefaultDir => Options.DefaultDir;
     }
 
     /// <summary>One overlay slot (P5): the ONE type behind the session-wide slot (<see cref="Ses.Overlay"/>,

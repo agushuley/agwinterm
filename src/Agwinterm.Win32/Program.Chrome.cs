@@ -483,10 +483,11 @@ internal partial class Program
         {
             bool wsFocused = _focusedWorkspaceId == cws.Id;
             int wsCount; lock (_workspaces) wsCount = _workspaces.Count;
+            A("Workspace Settings…", "", () => OpenEnvironmentSettings(cws));
+            A("New Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true));
             if (_profileCfg.Profiles.Count > 1)
                 foreach (var p in _profileCfg.Profiles)
                 { var nm = p.Name; A($"New Session — {nm}", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true, profileName: nm)); }
-            else A("New Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true));
             if (IsElevated()) A("New Non-Elevated Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true, deElevate: true));
             A("Open Directory…", "", () => { var d = PickFolder(); if (d is not null) CreateSession(Guid.NewGuid().ToString(), null, d, cws, true); });
             A("Set Default Directory…", "", () =>

@@ -2,6 +2,9 @@
 
 ## Agent-first
 
+Workspace defaults and global environment variables can be edited in
+[Workspace Settings and Settings → General → Environment variables](workspace-settings.md).
+
 - **Workspaces → sessions → panes** in a custom-drawn sidebar: drag-reorder, rename, flag, focus,
   unread badges (green `ok`, yellow `normal`, red `attention` or untyped; colors can be changed in Settings → Notifications), **multi-select with Ctrl/Shift+click** for batch flag / move / close, and reopen
   closed sessions *and workspaces* with `Ctrl+Shift+R`. See [workspace navigation](navigation.md).

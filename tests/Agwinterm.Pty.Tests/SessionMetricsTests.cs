@@ -111,7 +111,7 @@ public class SessionMetricsTests
     public void ATargetedPaneIsMeasuredRatherThanTheActiveOne()
     {
         var (server, host) = New();
-        string second = host.NewSession("second", null, null);
+        string second = host.NewSession(new(Name: "second"));
         // Pane 0 shares its session's id, exactly as the app does it, so the session id IS the
         // pane id here; a unique prefix of it must resolve the same way.
         host.MetricsBySession[second] = new PaneMetricsSnapshot(40, 12, 11, 22, 440, 264);

@@ -75,6 +75,19 @@ public static class ShellProfiles
         catch { /* best-effort */ }
     }
 
+    public static void SaveChecked(string appDir, Config config)
+    {
+        string path = PathFor(appDir);
+        Directory.CreateDirectory(appDir);
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(config, JsonOpts));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     /// <summary>Set the default profile by name and persist; returns the reloaded/normalized config.</summary>
     public static Config SetDefault(string appDir, string name)
     {

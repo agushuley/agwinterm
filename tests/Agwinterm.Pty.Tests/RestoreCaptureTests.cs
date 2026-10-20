@@ -62,7 +62,7 @@ public class RestoreCaptureTests
         var (server, host) = New();
         var s1 = host.ActiveSess!;
         string p1 = s1.AddPane().Let(_ => s1.PaneIds[1]);
-        string s2 = host.NewSession("second", null, null, noSelect: true);
+        string s2 = host.NewSession(new(Name: "second", NoSelect: true));
         var ses2 = host.Workspaces[0].Sessions[1];
         s1.Foreground["s1"] = "npm run dev";
         s1.Foreground[p1] = "cargo watch -x test";
@@ -267,7 +267,7 @@ public class RestoreCaptureTests
     public void AmbiguousName_IsRefused_AndNoSlotChanges()
     {
         var (server, host) = New();
-        host.NewSession("session 1", null, null);   // a second session with the same name
+        host.NewSession(new(Name: "session 1"));   // a second session with the same name
         host.Workspaces[0].Sessions[0].Foreground["s1"] = "npm run dev";
         var r = Capture(server, "session 1");
         Assert.False(Ok(r));
