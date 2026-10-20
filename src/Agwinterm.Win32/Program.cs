@@ -958,12 +958,12 @@ internal partial class Program : ISessionHost, IWindowHost
             nodes.Add(new Uia.Node
             {
                 Kind = Uia.NodeKind.SettingsGroup,
-                Name = "Settings",
+                Name = SettingsTitle,
                 Parent = 0,
                 Rect = ScreenRect(_setCard.Left, _setCard.Top, _setCard.Right - _setCard.Left, _setCard.Bottom - _setCard.Top),
             });
             var gkids = new List<int>();
-            for (int i = 0; i < SetTabNames.Length; i++)   // tab items (invokable; current one marked)
+            for (int i = 0; i < SettingsTabs.Length; i++)   // tab items (invokable; current one marked)
             {
                 gkids.Add(nodes.Count);
                 nodes.Add(new Uia.Node
@@ -971,7 +971,7 @@ internal partial class Program : ISessionHost, IWindowHost
                     Kind = Uia.NodeKind.SettingsTab,
                     Index = i,
                     Parent = grp,
-                    Name = SetTabNames[i] + (i == _setTab ? " tab, selected" : " tab"),
+                    Name = SettingsTabs[i] + (i == _setTab ? " tab, selected" : " tab"),
                     Selected = i == _setTab,
                     Focused = _setNav == i,
                     Rect = ScreenRect(_setCard.Left + 8f, _navHit[i * 2], SetNavW - 16f, _navHit[i * 2 + 1] - _navHit[i * 2]),
@@ -1087,7 +1087,7 @@ internal partial class Program : ISessionHost, IWindowHost
             SW.Toggle => IsOn(ConfigValue(r.Key)) ? "on" : "off",
             SW.Slider => ConfigValue(r.Key),
             SW.Dropdown or SW.Sound => CurrentDropdownText(r),
-            SW.Path => ConfigValue(r.Key) is { Length: > 0 } p ? p : "not set",
+            SW.Path => SettingsRowValue(r) is { Length: > 0 } p ? p : "not set",
             SW.Profile => string.Equals(r.Key, _profileCfg.Default, StringComparison.OrdinalIgnoreCase) ? "default" : "not default",
             _ => "",
         };
@@ -1113,11 +1113,11 @@ internal partial class Program : ISessionHost, IWindowHost
             var row = FocusableRows().FirstOrDefault(r => r.UiaIdentity == index);
             if (row is not null) { _setFocus = row; ActivateSetFocus(); }
         }
-        else if (kind == Uia.NodeKind.SettingsTab && _setOpen && index >= 0 && index < SetTabNames.Length)
+        else if (kind == Uia.NodeKind.SettingsTab && _setOpen && index >= 0 && index < SettingsTabs.Length)
         {
             _setTab = index; _setScroll = 0;
             _setFocus = FocusableRows().FirstOrDefault();
-            _uia.Announce($"{SetTabNames[index]} tab");
+            _uia.Announce($"{SettingsTabs[index]} tab");
             RequestRedraw();
         }
     }
@@ -1137,7 +1137,7 @@ internal partial class Program : ISessionHost, IWindowHost
                 if (_setOpen && row is not null) { _setNav = -1; _setFocus = row; _setFocusKb = true; AfterSetFocus(); }
                 break;
             case Uia.NodeKind.SettingsTab:
-                if (_setOpen && index >= 0 && index < SetTabNames.Length) { _setNav = index; _setFocusKb = true; AfterHeaderFocus(); }
+                if (_setOpen && index >= 0 && index < SettingsTabs.Length) { _setNav = index; _setFocusKb = true; AfterHeaderFocus(); }
                 break;
             case Uia.NodeKind.Session:
                 var session = AllSessions().FirstOrDefault(s => s.UiaIdentity == index);

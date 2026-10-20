@@ -1,13 +1,18 @@
 # Workspace settings and environment
 
-Right-click a workspace and choose **Workspace Settings…** to edit its name, default directory,
-default shell profile, and environment overrides. An empty directory or **Use application default**
+Right-click a workspace and choose **Workspace Settings…** to open the themed Settings panel.
+Its **General** tab edits the name, default directory, and default shell profile; **Environment**
+edits workspace variables. **Browse…** opens the folder picker at the current default directory;
+**Use application directory default** clears the directory override. An empty directory or **Use application default**
 inherits the existing application behavior. Explicit session cwd/profile arguments override workspace
 defaults. A missing saved profile falls back to the application profile; a missing saved directory
 falls back to the application's new-session-directory mode.
 
-Application-wide environment variables are under **Settings → General → Environment variables…**.
-Both editors validate before Apply; Cancel makes no changes. Existing sessions are not restarted.
+Application-wide environment variables are edited directly in **Settings → Environment**.
+Both editors use the same themed panel and validate before **Apply**. Workspace drafts are shared
+between its tabs. **Cancel**, Escape, or closing the panel discards changes not yet applied.
+Existing sessions are not restarted. Directory defaults are edited only in Workspace Settings,
+not through duplicate Set/Clear actions in the workspace menu.
 Shell profiles keep their existing `env` object in `profiles.json`; there is no new profile/session editor.
 
 ## Literal text editor

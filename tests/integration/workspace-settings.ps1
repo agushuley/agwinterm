@@ -98,6 +98,7 @@ $path = Join-Path '__APP_DIR__' ('report-' + $env:AGWINTERM_SESSION_ID + '.json'
         Set-Content -LiteralPath (Join-Path $appDirectory 'environment.json') -Encoding utf8
     Start-TestApp $false
     Check 'isolated app-data directory is used' (Test-Path -LiteralPath (Join-Path $appDirectory 'agwinterm.conf'))
+    . (Join-Path $PSScriptRoot 'workspace-settings-ui-cases.ps1')
     $root = Join-Path $appDirectory 'project'
     New-Item -ItemType Directory -Path $root | Out-Null
     $created = Invoke-Api 'workspace.new' @{ name = 'project'; defaultDir = $root; defaultProfile = 'workspace-profile'; env = @{ LAYER = 'workspace'; WORKSPACE_ONLY = 'yes'; TOKEN = "abc=def`nbcd=`nqw=" } }

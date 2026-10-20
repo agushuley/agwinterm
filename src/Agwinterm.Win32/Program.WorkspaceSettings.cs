@@ -7,7 +7,6 @@ internal partial class Program
 {
     private static IReadOnlyDictionary<string, string> _globalEnv = EnvironmentOverrides.Empty;
     private static string GlobalEnvironmentPath => Path.Combine(AppDir, "environment.json");
-    private EnvironmentSettingsDialog? _environmentDialog;
 
     private IReadOnlyDictionary<string, string> ReadGlobalEnvironment()
     {
@@ -101,29 +100,4 @@ internal partial class Program
         return JsonSerializer.Serialize(new { scope, env = snapshot });
     });
 
-    private void OpenEnvironmentSettings(Workspace? workspace = null)
-    {
-        if (_environmentDialog is not null) { _environmentDialog.Activate(); return; }
-        if (_setOpen) CloseSettings();
-        var original = workspace?.Options.Env ?? (workspace is null ? ReadGlobalEnvironment() : EnvironmentOverrides.Empty);
-        _environmentDialog = new EnvironmentSettingsDialog(_hwnd, workspace?.Name,
-            workspace?.Options ?? new(), original, _profileCfg.Profiles.Select(profile => profile.Name).ToArray(),
-            (name, options, environment) =>
-            {
-                if (workspace is null)
-                {
-                    EnvironmentOverrides.Save(GlobalEnvironmentPath, environment); _globalEnv = environment;
-                }
-                else
-                {
-                    if (!_workspaces.Contains(workspace)) return "Workspace no longer exists.";
-                    if (name.Length == 0) return "Workspace name cannot be empty.";
-                    if (ValidateWorkspaceOptions(options) is { } error) return error;
-                    workspace.Name = name; workspace.Options = SnapshotWorkspaceOptions(options with { Env = environment.Count == 0 ? null : environment });
-                    SaveState(); EmitEvent("tree"); RequestRedraw();
-                }
-                return null;
-            }, () => { _environmentDialog = null; });
-        _environmentDialog.Show();
-    }
 }
