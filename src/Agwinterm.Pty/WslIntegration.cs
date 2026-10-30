@@ -120,12 +120,12 @@ public static class WslIntegration
 
     public static string QuoteShell(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
-    public static string[] CommandArgs(ShellProfile profile, string command, string? cwd, bool interactive)
+    public static string[] CommandArgs(ShellProfile profile, string command, string? cwd, bool interactive, IReadOnlyDictionary<string, string>? environment = null)
     {
         string script = interactive
             ? "\"${SHELL:-/bin/sh}\" -ic " + QuoteShell(command) + "; exec \"${SHELL:-/bin/sh}\" -l"
             : command;
-        return LaunchArgs(Selectors(profile.Args).Concat(new[] { "--exec", "/bin/sh", "-lc", script }).ToArray(), cwd, profile.Env);
+        return LaunchArgs(Selectors(profile.Args).Concat(new[] { "--exec", "/bin/sh", "-lc", script }).ToArray(), cwd, environment ?? profile.Env);
     }
 
     public static string WindowsPath(ShellProfile profile, string path) => RunCore(profile, ["wslpath", "-w", path]);

@@ -7,6 +7,7 @@ replies a script can rely on, and the ones that answer a question a script would
 guess at.
 
 Related pages: [launching a session command](session-commands.md), [session HUD](session-hud.md),
+[workspace settings and environment](workspace-settings.md),
 [workspace navigation](navigation.md), [quick terminal](quick-terminal.md),
 [native picker](native-picker.md), [`image frameshm`](specs/image-frameshm.md). The subset agliteterm
 shares is canonical in [`tests/conformance/control-api.json`](../tests/conformance/control-api.json).

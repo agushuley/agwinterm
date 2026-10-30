@@ -102,6 +102,23 @@ public class WslIntegrationTests
     }
 
     [Fact]
+    public void CommandsUseEffectiveOverridesWithoutReapplyingProfileEnvironment()
+    {
+        var profile = new ShellProfile
+        {
+            Command = "wsl.exe", Args = ["-d", "Ubuntu"],
+            Env = new() { ["LAYER"] = "profile", ["PATH"] = "/profile/bin" }
+        };
+        var effective = EnvironmentOverrides.Merge(profile.Env,
+            new Dictionary<string, string> { ["LAYER"] = "workspace", ["PATH"] = "/workspace/bin" });
+        var args = WslIntegration.CommandArgs(profile, "printf '%s' \"$LAYER\"", "/work", false, effective);
+        Assert.Contains("LAYER=workspace", args);
+        Assert.Contains("PATH=/workspace/bin", args);
+        Assert.DoesNotContain("LAYER=profile", args);
+        Assert.Equal("profile", profile.Env["LAYER"]);
+    }
+
+    [Fact]
     public void EnvironmentPreservesUserFlagsAndRepairsIdentityForInteropRoundtrip()
     {
         var env = new Dictionary<string, string>

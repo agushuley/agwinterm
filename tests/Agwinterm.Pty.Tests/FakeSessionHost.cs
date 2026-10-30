@@ -168,7 +168,14 @@ internal sealed class FakeSessionHost : ISessionHost
         public string LastResult = OverlayPanes.NoResult;
         public bool Open => Term is not null;
     }
-    internal sealed class Ws { public string Id = "", Name = ""; public bool Collapsed; public string? DefaultDir; public List<Sess> Sessions = new(); }
+    internal sealed class Ws
+    {
+        public string Id = "", Name = "";
+        public bool Collapsed;
+        public WorkspaceOptions Options = new();
+        public string? DefaultDir { get => Options.DefaultDir; set => Options = Options with { DefaultDir = value }; }
+        public List<Sess> Sessions = new();
+    }
 
     internal readonly List<Ws> Workspaces = new();
     internal Ws ActiveWs;
@@ -324,7 +331,7 @@ internal sealed class FakeSessionHost : ISessionHost
                 CapturedCommands: s.PaneIds.Select(id => s.Captured.TryGetValue(id, out var c) ? c : "").ToList(),   // the slot, "" = none, parallel to PaneIds
                 Axis: s.Axis,
                 PaneOverlays: s.PaneOverlayWords(), Hud: s.Hud, ForegroundShells: s.ForegroundShells);
-        }).ToList(), Collapsed: w.Collapsed, DefaultDir: w.DefaultDir)).ToList();
+        }).ToList(), Collapsed: w.Collapsed, Options: w.Options)).ToList();
 
     public WindowStateSnapshot WindowState() =>
         new(SidebarVisible, Fullscreen: false, Maximized: false, QuickVisible, ActiveWs.Name, ActiveSess?.Name);
@@ -351,10 +358,10 @@ internal sealed class FakeSessionHost : ISessionHost
     // With neither flag: the CALLER's pane's workspace (caller = a pane id, exact or prefix, the way
     // the app's FindPaneById reads it), and only when there is no caller or it no longer resolves,
     // the active workspace — the last answer, not the first (task 5a).
-    public string NewSession(string? name, string? cwd, string? workspace, string? command = null,
-        string? workspaceName = null, bool createWorkspace = false, string? profile = null, bool noSelect = false, bool wait = false,
-        string? caller = null, string? commandMode = null)
+    public string NewSession(SessionCreateRequest request)
     {
+        var (name, cwd, workspace, command, workspaceName, createWorkspace, profile, noSelect, wait, caller, commandMode, env) = request;
+        LastSessionRequest = request;
         Ws? w;
         if (!string.IsNullOrEmpty(workspace))
         {
@@ -383,6 +390,7 @@ internal sealed class FakeSessionHost : ISessionHost
     }
 
     internal string? LastNewSessionCwd { get; private set; }
+    internal SessionCreateRequest? LastSessionRequest { get; private set; }
 
     public string DuplicateSession(string? target)
     {
@@ -454,9 +462,10 @@ internal sealed class FakeSessionHost : ISessionHost
         if (ReferenceEquals(ActiveSess, s)) ActiveSess = Workspaces.SelectMany(x => x.Sessions).FirstOrDefault();
         return true;
     }
-    public string NewWorkspace(string? name, string? defaultDir = null)
+    public string NewWorkspace(string? name, WorkspaceOptions? options = null)
     {
-        var w = new Ws { Id = "w" + (++_idSeq + 100), Name = string.IsNullOrEmpty(name) ? $"workspace {Workspaces.Count + 1}" : name };
+        string? defaultDir = options?.DefaultDir;
+        var w = new Ws { Id = "w" + (++_idSeq + 100), Name = string.IsNullOrEmpty(name) ? $"workspace {Workspaces.Count + 1}" : name, Options = options ?? new() };
         if (!string.IsNullOrEmpty(defaultDir)) w.DefaultDir = WorkspaceDefaultDirs.NormalizeSet(defaultDir);
         Workspaces.Add(w);
         return w.Id;

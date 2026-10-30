@@ -204,7 +204,7 @@ public class SessionRestoreTests
     public void AmbiguousName_IsRefused_AndPinsNothing()
     {
         var (server, host) = New();
-        host.NewSession("session 1", null, null);   // a second session with the same name
+        host.NewSession(new(Name: "session 1"));   // a second session with the same name
         var r = Restore(server, "session 1");
         Assert.False(Ok(r));
         Assert.Equal(0, AllPins(host));

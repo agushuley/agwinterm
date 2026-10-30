@@ -76,7 +76,24 @@ try {
     Start-Sleep -Seconds 2
     $screen = Ctl @('session', 'text', '--target', $session)
     Check (($screen -replace '\s', '') -match "ENV=1/$id") 'Identity crosses WSLENV'
-    Check ($screen -match 'agwinterm \d') 'Linux CLI reaches the private Windows control pipe'
+    for ($attempt = 0; $attempt -lt 20 -and $screen -notmatch 'agwinterm \d'; $attempt++) {
+        Start-Sleep -Milliseconds 500
+        $screen = Ctl @('session', 'text', '--target', $session)
+    }
+    Check ($screen -match 'agwinterm \d') "Linux CLI reaches the private Windows control pipe ($screen)"
+    $workspaceEnvFile = Join-Path $state 'workspace-env.json'
+    @{ WSL_LAYER_TEST = 'workspace'; WSL_WORKSPACE_ONLY = 'yes' } | ConvertTo-Json | Set-Content -LiteralPath $workspaceEnvFile
+    $workspace = Ctl @('workspace', 'new', '--name', 'WSL layered', '--default-profile', 'WSL test', '--env-file', $workspaceEnvFile)
+    $sessionEnvFile = Join-Path $state 'session-env.json'
+    @{ WSL_LAYER_TEST = 'session' } | ConvertTo-Json | Set-Content -LiteralPath $sessionEnvFile
+    $layered = Ctl @('session', 'new', '--workspace', $workspace, '--env-file', $sessionEnvFile, '--no-select')
+    $null = Ctl @('session', 'type', ('printf "LAYERED=%s/%s\n" "$WSL_LAYER_TEST" "$WSL_WORKSPACE_ONLY"' + [char]13), '--target', $layered)
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 500
+        $screen = Ctl @('session', 'text', '--target', $layered)
+        if ($screen.Contains('LAYERED=session/yes')) { break }
+    }
+    Check ($screen.Contains('LAYERED=session/yes')) "Workspace WSL profile and layered overrides reach Linux ($screen)"
     $null = Ctl @('session', 'type', ('mkdir -p "$HOME/path with spaces"; cd "$HOME/path with spaces"' + [char]13), '--target', $session)
     Start-Sleep -Seconds 1
     $copy = Ctl @('session', 'duplicate', '--target', $session)

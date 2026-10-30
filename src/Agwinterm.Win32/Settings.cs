@@ -11,14 +11,13 @@ namespace Agwinterm.Win32;
 
 /// <summary>
 /// The Settings panel: a themed surface drawn in Direct2D inside our own window (like the command
-/// palette), with custom widgets — no native Win32 chrome. Five tabs (General / Appearance /
-/// Notifications / Agent Status / Key Mapping) matching agterm. Every widget writes its key through
-/// <see cref="ConfigSetInternal"/> (the same path as the <c>config.set</c> verb) so changes persist to
-/// agwinterm.conf and apply live. Opened from the title-bar gear, the palette, or <c>settings.open</c>.
+/// palette), with custom widgets — no native Win32 chrome. Ordinary settings write through
+/// <see cref="ConfigSetInternal"/> and apply live; environment and workspace drafts validate on Apply.
+/// Opened from the title-bar gear, the palette, workspace context menu, or <c>settings.open</c>.
 /// </summary>
 internal partial class Program
 {
-    private enum SW { Section, Toggle, Slider, Dropdown, Color, Sound, Path, Button, Info, Diag, Profile }
+    private enum SW { Section, Toggle, Slider, Dropdown, Color, Sound, Path, Button, Info, Diag, Profile, Text }
 
     private sealed class SetRow
     {
@@ -30,6 +29,16 @@ internal partial class Program
         public string[] Opts = Array.Empty<string>();
         public string[] Vals = Array.Empty<string>();
         public Action? OnClick;
+        public Func<bool>? Enabled;
+        public Func<string>? ReadValue;
+        public Action<string>? WriteValue;
+        public bool Multiline, Footer;
+        public string Text = "";
+        public IntPtr Edit, EditProc, EditFont;
+        public int EditDpi;
+        public int EditClipTop, EditClipBottom;
+        public RECT EditRect;
+        public bool EditVisible;
         // computed each frame (absolute px); Hit is the clickable widget area, W a secondary button (Path "Choose…")
         public float Hx0, Hy0, Hx1, Hy1;
         public float Bx0, By0, Bx1, By1;      // secondary button (Path)
@@ -44,11 +53,14 @@ internal partial class Program
     private int _setNav = -1;    // >=0: keyboard focus is on tab-header[_setNav] instead of a row
     private bool _setFocusKb;    // draw the focus rectangle only when focus was last moved by keyboard
     private ID2D1StrokeStyle? _focusStroke;   // cached dotted stroke for the classic keyboard-focus rect
+    private IDWriteTextFormat? _settingsParagraph;
 
     private static bool Interactive(SW k) =>
-        k is SW.Toggle or SW.Slider or SW.Dropdown or SW.Color or SW.Sound or SW.Path or SW.Button or SW.Profile;
-    private List<SetRow> FocusableRows() => _setRows.FindAll(r => r.Tab == _setTab && Interactive(r.Kind));
-    private readonly float[] _navHit = new float[6 * 2];   // per-tab nav row y0,y1
+        k is SW.Toggle or SW.Slider or SW.Dropdown or SW.Color or SW.Sound or SW.Path or SW.Button or SW.Profile or SW.Text;
+    private bool RowInSettingsTab(SetRow row) => row.Tab < 0 || row.Tab == _setTab;
+    private static bool SettingsRowEnabled(SetRow row) => row.Enabled?.Invoke() != false;
+    private List<SetRow> FocusableRows(bool includeDisabled = false) => _setRows.FindAll(r => RowInSettingsTab(r) && Interactive(r.Kind) && (includeDisabled || SettingsRowEnabled(r)));
+    private readonly float[] _navHit = new float[SetTabNames.Length * 2];
     private Rect _setCard;
     private float _setCloseX0, _setCloseY0, _setCloseX1, _setCloseY1;
     private float _setPaneTop, _setPaneBottom, _setContentH;
@@ -63,12 +75,17 @@ internal partial class Program
     private Rect _ddPanel;
     private readonly List<(float y0, float y1, int idx)> _ddRows = new();
 
-    private static readonly string[] SetTabNames = { "General", "Appearance", "Notifications", "Agent Status", "Key Mapping", "Profiles" };
+    private static readonly string[] SetTabNames = { "General", "Appearance", "Notifications", "Agent Status", "Key Mapping", "Profiles", "Environment" };
+    private static readonly string[] WorkspaceTabNames = { "General", "Environment" };
+    private string[] SettingsTabs => _settingsWorkspace is null ? SetTabNames : WorkspaceTabNames;
+    private string SettingsTitle => _settingsWorkspace is null ? "Settings" : "Workspace Settings";
+    private bool SettingsHasFooter => _settingsWorkspace is not null || _setTab == SetTabNames.Length - 1;
 
     /// <summary>Open the themed Settings panel (entry point for the gear / palette / settings.open verb).</summary>
     private void OpenSettingsWindow()
     {
         if (_palette != PaletteKind.None) ClosePalette();
+        BeginEnvironmentEditing(null);
         BuildSettingsRows();
         _setOpen = true; _setTab = 0; _setScroll = 0; _ddRow = null; _setDragRow = null;
         _setFocus = FocusableRows().FirstOrDefault();
@@ -80,6 +97,9 @@ internal partial class Program
     private void CloseSettings()
     {
         _setOpen = false; _ddRow = null; _setDragRow = null;
+        DestroySettingsTextControls();
+        _settingsWorkspace = null;
+        SetFocus(_hwnd);
         _uia.Announce("Settings closed");
         RequestRedraw();
     }
@@ -89,7 +109,9 @@ internal partial class Program
 
     private void BuildSettingsRows()
     {
+        DestroySettingsTextControls();
         _setRows.Clear();
+        if (_settingsWorkspace is not null) { BuildWorkspaceSettingsRows(); return; }
         void Sec(int t, string s) => _setRows.Add(new SetRow { Kind = SW.Section, Tab = t, Label = s });
         void Tog(int t, string k, string l) => _setRows.Add(new SetRow { Kind = SW.Toggle, Tab = t, Key = k, Label = l });
         void Sld(int t, string k, string l, int lo, int hi) => _setRows.Add(new SetRow { Kind = SW.Slider, Tab = t, Key = k, Label = l, Min = lo, Max = hi });
@@ -203,6 +225,7 @@ internal partial class Program
         Btn(5, "Edit profiles.json…", EditProfilesJson);
         Btn(5, "Reload", () => { _profileCfg = Agwinterm.Pty.ShellProfiles.Load(AppDir); BuildSettingsRows(); RequestRedraw(); });
         _setRows.Add(new SetRow { Kind = SW.Info, Tab = 5, Label = "Click a profile to set the default; edit profiles.json then Reload to add your own." });
+        AddEnvironmentSettingsRows(SetTabNames.Length - 1);
     }
 
     /// <summary>Open profiles.json in the default editor (seeding it first if needed).</summary>
@@ -252,7 +275,7 @@ internal partial class Program
 
         // Header + close button
         brush.Color = ChromeText;
-        rt.DrawText("Settings", _uiFont, new Rect(cardX + SetPad, cardY, 200f, SetHeader), brush);
+        rt.DrawText(SettingsTitle, _uiFont, new Rect(cardX + SetPad, cardY, 200f, SetHeader), brush);
         float cbSz = 26f, cbX = cardX + cardW - cbSz - 12f, cbY = cardY + (SetHeader - cbSz) / 2f;
         _setCloseX0 = cbX; _setCloseY0 = cbY; _setCloseX1 = cbX + cbSz; _setCloseY1 = cbY + cbSz;
         brush.Color = ChromeDim;
@@ -263,7 +286,7 @@ internal partial class Program
 
         // Left nav
         float navY = cardY + SetHeader + 8f;
-        for (int i = 0; i < SetTabNames.Length; i++)
+        for (int i = 0; i < SettingsTabs.Length; i++)
         {
             float ry = navY + i * 34f;
             _navHit[i * 2] = ry; _navHit[i * 2 + 1] = ry + 32f;
@@ -273,7 +296,7 @@ internal partial class Program
                 rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(cardX + 8f, ry, SetNavW - 16f, 32f), RadiusX = 6f, RadiusY = 6f }, brush);
             }
             brush.Color = i == _setTab ? SbActiveText : ChromeDim;
-            rt.DrawText(SetTabNames[i], _uiFont, new Rect(cardX + 20f, ry, SetNavW - 28f, 32f), brush);
+            rt.DrawText(SettingsTabs[i], _uiFont, new Rect(cardX + 20f, ry, SetNavW - 28f, 32f), brush);
             if (_setFocusKb && _setNav == i)   // keyboard focus on this tab header
             {
                 brush.Color = ChromeText;
@@ -284,7 +307,9 @@ internal partial class Program
         // Right pane (clipped + scrolled)
         float paneX = cardX + SetNavW, paneW = cardW - SetNavW;
         _setPaneTop = cardY + SetHeader + 6f;
-        _setPaneBottom = cardY + cardH - 6f;
+        _setPaneBottom = cardY + cardH - 6f - (SettingsHasFooter ? 84f : 0f);
+        foreach (var row in _setRows)
+            if (!RowInSettingsTab(row) || _ddRow is not null) HideSettingsText(row);
         rt.PushAxisAlignedClip(new Rect(paneX, _setPaneTop, paneW, _setPaneBottom - _setPaneTop), AntialiasMode.Aliased);
         float y = _setPaneTop + 6f - _setScroll;
         float lblX = paneX + SetPad;
@@ -292,8 +317,8 @@ internal partial class Program
         foreach (var r in _setRows)
         {
             r.Vis = false;
-            if (r.Tab != _setTab) continue;
-            float rowH = r.Kind == SW.Section ? SetSecH : r.Kind == SW.Diag ? 150f : r.Kind == SW.Profile ? 46f : SetRowH;
+            if (!RowInSettingsTab(r) || r.Footer) continue;
+            float rowH = SettingsRowHeight(r);
             bool onscreen = y + rowH > _setPaneTop && y < _setPaneBottom;
             if (onscreen)
             {
@@ -304,10 +329,29 @@ internal partial class Program
                     rt.DrawRectangle(new Rect(paneX + 4f, y - 2f, paneW - 8f, rowH + 4f), brush, 1.5f, FocusStroke(rt));
                 }
             }
+            else HideSettingsText(r);
             y += rowH + (r.Kind == SW.Section ? 2f : 4f);
         }
         _setContentH = (y + _setScroll) - (_setPaneTop + 6f);
         rt.PopAxisAlignedClip();
+
+        if (SettingsHasFooter)
+        {
+            brush.Color = _settingsFailed ? new Color4(0.95f, 0.55f, 0.35f, 1f) : ChromeDim;
+            rt.DrawText(_settingsMessage, SettingsParagraph(), new Rect(lblX, _setPaneBottom + 4f, rightX - lblX, 36f), brush);
+            float buttonX = lblX, buttonY = cardY + cardH - 42f;
+            foreach (var row in _setRows.Where(row => row.Footer && RowInSettingsTab(row)))
+            {
+                DrawPanelButton(rt, brush, buttonX, buttonY, 96f, 28f, row.Label, SettingsRowEnabled(row));
+                row.Hx0 = buttonX; row.Hx1 = buttonX + 96f; row.Hy0 = buttonY; row.Hy1 = buttonY + 28f; row.Vis = true;
+                if (_setFocusKb && _setNav < 0 && ReferenceEquals(row, _setFocus) && SettingsRowEnabled(row))
+                {
+                    brush.Color = ChromeText;
+                    rt.DrawRectangle(new Rect(buttonX - 2f, buttonY - 2f, 100f, 32f), brush, 1.5f, FocusStroke(rt));
+                }
+                buttonX += 108f;
+            }
+        }
 
         if (_ddRow is not null) DrawDropdown(rt, brush);
     }
@@ -351,7 +395,7 @@ internal partial class Program
             r.Hx0 = lblX - 8f; r.Hy0 = y; r.Hx1 = rightX + rr + 2f; r.Hy1 = y + rowH;
             return;
         }
-        if (r.Kind is not (SW.Info or SW.Diag))   // Info/Diag draw their own text below (avoid a double-draw)
+        if (r.Kind is not (SW.Info or SW.Diag or SW.Text) && !(r.Kind == SW.Path && r.WriteValue is not null))
         {
             brush.Color = ChromeText;
             rt.DrawText(r.Label, _uiFont, new Rect(lblX, y, paneW - 2 * SetPad - 180f, rowH), brush);
@@ -359,6 +403,9 @@ internal partial class Program
 
         switch (r.Kind)
         {
+            case SW.Text:
+                DrawSettingsTextRow(rt, brush, r, lblX, rightX, y, rowH);
+                break;
             case SW.Toggle:
                 {
                     bool on = IsOn(ConfigValue(r.Key));
@@ -415,6 +462,14 @@ internal partial class Program
                 }
             case SW.Path:
                 {
+                    if (r.WriteValue is not null)
+                    {
+                        DrawSettingsTextRow(rt, brush, r, lblX, rightX - 94f, y, rowH);
+                        float buttonTop = y + 26f;
+                        DrawPanelButton(rt, brush, rightX - 84f, buttonTop, 84f, 28f, "Browse…");
+                        r.Bx0 = rightX - 84f; r.By0 = buttonTop; r.Bx1 = rightX; r.By1 = buttonTop + 28f;
+                        break;
+                    }
                     float bw = 84f, bh = 26f, bx = rightX - bw, by = y + (rowH - bh) / 2f;
                     float fx = lblX, fw = bx - 10f - fx;
                     brush.Color = Mix(PalBg, ChromeText, 0.06f);
@@ -438,7 +493,7 @@ internal partial class Program
             case SW.Info:
                 {
                     brush.Color = ChromeDim;
-                    rt.DrawText(r.Label, _uiSmall, new Rect(lblX, y, paneW - 2 * SetPad, rowH), brush);
+                    rt.DrawText(r.ReadValue?.Invoke() ?? r.Label, SettingsParagraph(), new Rect(lblX, y + 4f, paneW - 2 * SetPad, rowH - 4f), brush);
                     r.Vis = false;
                     break;
                 }
@@ -454,13 +509,13 @@ internal partial class Program
         }
     }
 
-    private void DrawPanelButton(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, float x, float y, float w, float h, string label)
+    private void DrawPanelButton(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, float x, float y, float w, float h, string label, bool enabled = true)
     {
-        brush.Color = Mix(PalBg, ChromeText, 0.14f);
+        brush.Color = Mix(PalBg, ChromeText, enabled ? 0.14f : 0.05f);
         rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(x, y, w, h), RadiusX = 6f, RadiusY = 6f }, brush);
         brush.Color = PalBorder;
         rt.DrawRoundedRectangle(new RoundedRectangle { Rect = new Rect(x, y, w, h), RadiusX = 6f, RadiusY = 6f }, brush, 1f);
-        brush.Color = ChromeText;
+        brush.Color = enabled ? ChromeText : ChromeDim;
         // Centered format: the leading-aligned _uiSmall put the label flush against the button's left
         // edge (the width budget's padding all landed on the right).
         rt.DrawText(label, _uiSmallCenter, new Rect(x, y, w, h), brush);
@@ -468,7 +523,7 @@ internal partial class Program
 
     private string CurrentDropdownText(SetRow r)
     {
-        string v = ConfigValue(r.Key);
+        string v = SettingsRowValue(r);
         if (r.Kind == SW.Sound) v = SoundDisplayName(v);
         int idx = Array.FindIndex(r.Vals, o => string.Equals(o, v, StringComparison.OrdinalIgnoreCase));
         if (idx >= 0) return r.Opts[idx];
@@ -493,10 +548,12 @@ internal partial class Program
 
     private void OpenDropdown(SetRow r)
     {
+        SetFocus(_hwnd);
+        foreach (var row in _setRows) HideSettingsText(row);
         _ddRow = r; _ddQuery = ""; _ddSel = 0;
         FilterDropdown();
         // select the current value
-        string cur = r.Kind == SW.Sound ? SoundDisplayName(ConfigValue(r.Key)) : ConfigValue(r.Key);
+        string cur = r.Kind == SW.Sound ? SoundDisplayName(SettingsRowValue(r)) : SettingsRowValue(r);
         int at = _ddFiltered.FindIndex(i => string.Equals(r.Vals[i], cur, StringComparison.OrdinalIgnoreCase));
         if (at >= 0) _ddSel = at;
         RequestRedraw();
@@ -571,6 +628,7 @@ internal partial class Program
             }
             else { ConfigSetInternal("blocked-sound", val == "None" ? "" : val); if (val != "None") PlayStatusSound(val); }
         }
+        else if (r.WriteValue is not null) r.WriteValue(val);
         else ConfigSetInternal(r.Key, val);
         _uia.Announce($"{r.Label}, {r.Opts[_ddFiltered[filteredIdx]]}");
         RequestRedraw();
@@ -592,21 +650,23 @@ internal partial class Program
         if (mx >= _setCloseX0 && mx <= _setCloseX1 && my >= _setCloseY0 && my <= _setCloseY1) { CloseSettings(); return; }
         // nav
         if (mx >= _setCard.Left + 8f && mx <= _setCard.Left + SetNavW - 8f)
-            for (int i = 0; i < SetTabNames.Length; i++)
-                if (my >= _navHit[i * 2] && my < _navHit[i * 2 + 1]) { _setTab = i; _setScroll = 0; _setFocus = FocusableRows().FirstOrDefault(); _setNav = -1; _setFocusKb = false; _uia.Announce(SetTabNames[i] + " tab"); RequestRedraw(); return; }
+            for (int i = 0; i < SettingsTabs.Length; i++)
+                if (my >= _navHit[i * 2] && my < _navHit[i * 2 + 1]) { _setTab = i; _setScroll = 0; _setFocus = FocusableRows().FirstOrDefault(); _setNav = -1; _setFocusKb = false; _uia.Announce(SettingsTabs[i] + " tab"); RequestRedraw(); return; }
         // outside the card → dismiss
         if (mx < _setCard.Left || mx > _setCard.Right || my < _setCard.Top || my > _setCard.Bottom) { CloseSettings(); return; }
         // widgets (only within the visible pane)
-        if (my < _setPaneTop || my > _setPaneBottom) return;
+        if (my < _setPaneTop || my > _setCard.Bottom - 6f) return;
         foreach (var r in _setRows)
         {
-            if (r.Tab != _setTab) continue;
-            if (r.Kind == SW.Path && Hit(r.Bx0, r.By0, r.Bx1, r.By1, mx, my))
-            { var d = PickFolder(); if (d is not null) { ConfigSetInternal("new-session-dir", d); ConfigSetInternal("new-session-dir-mode", "custom"); } return; }
+            if (!RowInSettingsTab(r) || !SettingsRowEnabled(r)) continue;
+            if (r.Vis && r.Kind == SW.Path && Hit(r.Bx0, r.By0, r.Bx1, r.By1, mx, my))
+            { BrowseSettingsDirectory(r); return; }
             if (!r.Vis || !Hit(r.Hx0, r.Hy0, r.Hx1, r.Hy1, mx, my)) continue;
             _setFocus = r; _setNav = -1; _setFocusKb = false;   // mouse focus: sync selection but hide the focus rect
             switch (r.Kind)
             {
+                case SW.Text: if (r.Edit != IntPtr.Zero) SetFocus(r.Edit); return;
+                case SW.Path: if (r.Edit != IntPtr.Zero) SetFocus(r.Edit); return;
                 case SW.Toggle:
                     {
                         bool on = !IsOn(ConfigValue(r.Key));
@@ -692,7 +752,7 @@ internal partial class Program
                 return true;
             case VK_END:
                 _setFocusKb = true;
-                if (_setNav >= 0) { _setNav = SetTabNames.Length - 1; AfterHeaderFocus(); }
+                if (_setNav >= 0) { _setNav = SettingsTabs.Length - 1; AfterHeaderFocus(); }
                 else if (rows.Count > 0) { _setFocus = rows[^1]; AfterSetFocus(); }
                 return true;
             case VK_PRIOR: CycleSetTab(-1); return true;   // PageUp → previous tab
@@ -723,7 +783,7 @@ internal partial class Program
     {
         _setFocusKb = true;
         var rows = FocusableRows();
-        int H = SetTabNames.Length, total = H + rows.Count;
+        int H = SettingsTabs.Length, total = H + rows.Count;
         if (total == 0) return;
         int ri = _setFocus is not null ? rows.IndexOf(_setFocus) : -1;
         int pos = _setNav >= 0 ? _setNav : (ri >= 0 ? H + ri : 0);
@@ -736,13 +796,13 @@ internal partial class Program
     private void MoveHeader(int dir)
     {
         _setFocusKb = true;
-        _setNav = (_setNav + dir + SetTabNames.Length) % SetTabNames.Length;
+        _setNav = (_setNav + dir + SettingsTabs.Length) % SettingsTabs.Length;
         AfterHeaderFocus();
     }
 
     private void AfterHeaderFocus()
     {
-        _uia.Announce($"{SetTabNames[_setNav]} tab{(_setNav == _setTab ? ", selected" : "")}, press Enter to open");
+        _uia.Announce($"{SettingsTabs[_setNav]} tab{(_setNav == _setTab ? ", selected" : "")}, press Enter to open");
         RequestRedraw();
     }
 
@@ -753,7 +813,7 @@ internal partial class Program
         _setTab = _setNav;
         _setScroll = 0;
         _setFocus = FocusableRows().FirstOrDefault();
-        _uia.Announce($"{SetTabNames[_setTab]} tab, selected");
+        _uia.Announce($"{SettingsTabs[_setTab]} tab, selected");
         RequestRedraw();
     }
 
@@ -761,10 +821,10 @@ internal partial class Program
     {
         _setFocusKb = true;
         _setNav = -1;
-        _setTab = (_setTab + dir + SetTabNames.Length) % SetTabNames.Length;
+        _setTab = (_setTab + dir + SettingsTabs.Length) % SettingsTabs.Length;
         _setScroll = 0;
         _setFocus = FocusableRows().FirstOrDefault();
-        _uia.Announce($"{SetTabNames[_setTab]} tab");
+        _uia.Announce($"{SettingsTabs[_setTab]} tab");
         AfterSetFocus();
     }
 
@@ -773,6 +833,7 @@ internal partial class Program
         ScrollSetFocusIntoView();
         AnnounceSetFocus();
         RequestRedraw();
+        if (_setFocus is { Kind: SW.Text, Edit: var edit } && edit != IntPtr.Zero) SetFocus(edit);
     }
 
     private void AnnounceSetFocus()
@@ -784,7 +845,7 @@ internal partial class Program
             SW.Toggle => IsOn(ConfigValue(r.Key)) ? "on" : "off",
             SW.Slider => ConfigValue(r.Key),
             SW.Dropdown or SW.Sound => CurrentDropdownText(r),
-            SW.Path => ConfigValue(r.Key) is { Length: > 0 } p ? p : "not set",
+            SW.Path => SettingsRowValue(r) is { Length: > 0 } p ? p : "not set",
             SW.Profile => string.Equals(r.Key, _profileCfg.Default, StringComparison.OrdinalIgnoreCase) ? "default" : "",
             _ => "",
         };
@@ -796,6 +857,7 @@ internal partial class Program
             SW.Button => "button",
             SW.Color => "color",
             SW.Path => "folder",
+            SW.Text => "text editor",
             SW.Profile => "profile",
             _ => "",
         };
@@ -805,9 +867,10 @@ internal partial class Program
     private void ActivateSetFocus()
     {
         var r = _setFocus;
-        if (r is null) return;
+        if (r is null || !SettingsRowEnabled(r)) return;
         switch (r.Kind)
         {
+            case SW.Text: if (r.Edit != IntPtr.Zero) SetFocus(r.Edit); break;
             case SW.Toggle:
                 bool on = !IsOn(ConfigValue(r.Key));
                 ConfigSetInternal(r.Key, on ? "true" : "false");
@@ -816,8 +879,7 @@ internal partial class Program
             case SW.Dropdown: case SW.Sound: OpenDropdown(r); break;
             case SW.Color: PickColorKey(r.Key); break;
             case SW.Path:
-                var d = PickFolder();
-                if (d is not null) { ConfigSetInternal("new-session-dir", d); ConfigSetInternal("new-session-dir-mode", "custom"); }
+                BrowseSettingsDirectory(r);
                 break;
             case SW.Profile: SetProfileDefault(r.Key); _uia.Announce($"{r.Key} is now the default profile"); break;
             case SW.Button: _uia.Announce(r.Label); r.OnClick?.Invoke(); break;
@@ -845,8 +907,8 @@ internal partial class Program
         float y = 6f;
         foreach (var r in _setRows)
         {
-            if (r.Tab != _setTab) continue;
-            float rowH = r.Kind == SW.Section ? SetSecH : r.Kind == SW.Diag ? 150f : r.Kind == SW.Profile ? 46f : SetRowH;
+            if (!RowInSettingsTab(r) || r.Footer) continue;
+            float rowH = SettingsRowHeight(r);
             if (ReferenceEquals(r, _setFocus))
             {
                 float viewH = _setPaneBottom - _setPaneTop - 12f;

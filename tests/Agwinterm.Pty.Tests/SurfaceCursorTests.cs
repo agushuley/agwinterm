@@ -193,7 +193,7 @@ public class SurfaceCursorTests
     {
         var host = new FakeSessionHost();
         using var server = new ControlServer(host);
-        host.NewSession("session 1", null, null);   // a second session sharing the first one's name
+        host.NewSession(new(Name: "session 1"));   // a second session sharing the first one's name
 
         // Reading the wrong terminal's caret then typing into it is the failure this prevents.
         Assert.False(Cursor(server, "session 1").GetProperty("ok").GetBoolean());
