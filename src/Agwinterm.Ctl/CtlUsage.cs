@@ -122,6 +122,8 @@ public static class CtlUsage
           agwintermctl image frameshm --images '[{"name":"Local\\agwinterm-frame-x","slot":0,...}]'
               (several entries applied as one all-or-nothing frame; see docs/specs/image-frameshm.md)
           agwintermctl install hooks
+          agwintermctl install cli|skill|shell [--target ID]  (uses the session's Windows/WSL environment)
+          agwintermctl session bind <agent> --resume <id> --pid <hook-pid> --cwd <directory>
         Target defaults to $AGWINTERM_SESSION_ID (the current session) when not given.
         --timeout <seconds> bounds the wait for the app's reply (default 30, 0 = no limit; a
             `session overlay open --block` waits for its overlay without a limit unless given).

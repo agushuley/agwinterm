@@ -66,7 +66,7 @@ choco install agwinterm
 Direct download, from the [releases page](https://github.com/yeroo/agwinterm/releases):
 
 - **`agwinterm-setup-<version>.exe`** — per-user installer (Start-menu shortcut and uninstaller).
-- **`agwinterm-portable-<version>-win-x64.exe`** — a single self-contained exe, no installation; settings still live under `%LOCALAPPDATA%\agwinterm`.
+- **`agwinterm-portable-<version>-win-x64.exe`** — a single self-contained exe, no installation; settings still live under `%LOCALAPPDATA%\agwinterm`. The CLI and WSL helpers for Linux x64/ARM64 are embedded and extracted on first use to `%LOCALAPPDATA%\agwinterm\portable-tools`.
 
 **winget and Chocolatey get checkpoint releases only** — versions whose patch number is a multiple of 9 (0.17.9, 0.17.18, 0.17.27...). Both are human-moderated, and this project releases faster than those queues drain. Everything in between ships as a GitHub release, and both the in-app updater and Scoop pick those up immediately, so **the fastest way to stay current is the installer or Scoop**.
 
@@ -77,6 +77,8 @@ gh attestation verify <file> --repo yeroo/agwinterm
 ```
 
 The installer is deliberately minimal. The integrations are **opt-in from inside the app**, from the command palette (`Ctrl+Shift+P`) or Settings, and safe to rerun: *Install Command-Line Tool (PATH)*, *Install Agent Status Hooks*, *Install Agent Skill* and *Install Shell Integration* (the same four are `agwintermctl install cli|hooks|skill|shell`), and default-terminal registration in *Settings → General*.
+
+For WSL, select the distribution's session before installing: integrations use its Linux user and home directory. WSL sessions support the control CLI, agent hooks and resume, bash/zsh working-directory tracking, Linux command overlays, and path conversion for Explorer and file drops. See [WSL setup](docs/wsl.md).
 
 On an older or low-RAM machine, take **[agliteterm](https://github.com/yeroo/agliteterm)** instead: half the download, no .NET at all, and the same shared control-API subset. The two install independently and can live side by side.
 

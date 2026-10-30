@@ -523,6 +523,11 @@ internal partial class Program
     {
         if (_active is null) return;
         string cwd = PaneCwd(_active.ActivePane);
+        if (WslIntegration.IsWsl(ResolveProfile(_active.ProfileName)?.Command) && cwd.StartsWith('/'))
+        {
+            RevealLinuxPath(cwd, select: true);
+            return;
+        }
         if (cwd.Length == 0 || !Directory.Exists(cwd)) { ShowToast("no directory to reveal"); return; }
         ShellExecuteW(IntPtr.Zero, "open", "explorer.exe", "/select,\"" + cwd + "\"", null, SW_SHOW);   // the directory selected in its parent, as agterm's Reveal does
     }

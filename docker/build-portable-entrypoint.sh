@@ -18,7 +18,18 @@ if [ -z "$git_sha" ]; then
 fi
 
 rm -rf "$stage"
-mkdir -p "$stage" /out /releases
+mkdir -p "$stage/tools" /out /releases
+cp /helpers/* "$stage/tools/"
+
+echo "== publish embedded CLI and WSL helpers =="
+dotnet publish "$repo/src/Agwinterm.Ctl/Agwinterm.Ctl.csproj" \
+  -c Release -r win-x64 --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:EnableCompressionInSingleFile=true \
+  -p:DebugType=none \
+  -p:Version="$app_version" \
+  -o "$stage/tools"
+(cd "$stage/tools" && zip -j "$stage/tools.zip" agwintermctl.exe agwinterm-hook.exe agwinterm-hook-linux-x64 agwinterm-hook-linux-arm64)
 
 echo "== publish single-file portable exe (${app_version}) =="
 dotnet publish "$repo/src/Agwinterm.Win32/Agwinterm.Win32.csproj" \
@@ -29,6 +40,7 @@ dotnet publish "$repo/src/Agwinterm.Win32/Agwinterm.Win32.csproj" \
   -p:SatelliteResourceLanguages=en \
   -p:DebugType=none \
   -p:Version="$app_version" \
+  -p:PortableToolsArchive="$stage/tools.zip" \
   -o "$stage"
 
 exe="$stage/Agwinterm.Win32.exe"
@@ -42,6 +54,7 @@ short_name="agwinterm-${app_version}-g${git_sha}-win-x64.exe"
 dst="/out/$portable_name"
 
 cp "$exe" "$dst"
+cp -r "$stage/tools" /out/
 size_mb=$(du -m "$dst" | cut -f1)
 echo "== done: $dst (${size_mb} MB) =="
 

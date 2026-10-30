@@ -555,6 +555,12 @@ internal partial class Program : ISessionHost, IWindowHost
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--extract-tools", var toolsRoot])
+        {
+            try { CliInstaller.ExtractPortableTools(toolsRoot); }
+            catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+            return;
+        }
         ParseLaunchArgs(args);
         // Publish the resolved instance id so child processes and shared (Pty) helpers resolve the same
         // data dir — and a nested agwinterm inherits the dev/release identity of the one that launched it.

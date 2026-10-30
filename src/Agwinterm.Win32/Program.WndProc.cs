@@ -136,7 +136,13 @@ internal partial class Program
                         {
                             string text = string.Join(" ", paths.Select(p => p.IndexOfAny(new[] { ' ', '\'', '(', ')', '&', ';' }) >= 0 ? "\"" + p + "\"" : p));
                             var target = PaneAt(dp.x, dp.y)?.pane ?? ActiveSurface();
-                            if (target is not null) PasteTextInto(target, text);
+                            if (target is not null)
+                            {
+                                var profile = IntegrationProfileOnUi(_active?.Id);
+                                if (profile is not null && WslIntegration.IsWsl(profile.Command))
+                                    PasteWslPaths(target, profile, paths);
+                                else PasteTextInto(target, text);
+                            }
                         }
                     }
                     finally { DragFinish(hDrop); }

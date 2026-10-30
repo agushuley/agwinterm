@@ -79,10 +79,10 @@ switch (area)
         if (Opt("limit") is { } limV && int.TryParse(limV, out var limN)) cargs["limit"] = limN;
         target = null;
         break;
-    case "install" when sub == "hooks": cmd = "install.hooks"; break;
-    case "install" when sub == "skill": cmd = "install.skill"; break;
-    case "install" when sub == "shell": cmd = "install.shell"; break;
-    case "install" when sub == "cli": cmd = "install.cli"; if (options.ContainsKey("remove")) cargs["remove"] = true; break;
+    case "install" when sub == "hooks": cmd = "install.hooks"; target = DefaultTarget(); break;
+    case "install" when sub == "skill": cmd = "install.skill"; target = DefaultTarget(); break;
+    case "install" when sub == "shell": cmd = "install.shell"; target = DefaultTarget(); break;
+    case "install" when sub == "cli": cmd = "install.cli"; target = DefaultTarget(); if (options.ContainsKey("remove")) cargs["remove"] = true; break;
     case "omp" when sub == "list": cmd = "omp.list"; break;
     case "omp" when sub == "set":
         cmd = "omp.set";
@@ -426,7 +426,12 @@ switch (area)
                 break;
             case "focus": cargs["dir"] = rest.Count > 0 ? rest[0] : "other"; break; // primary|split|left|right|top|bottom|other — `other` is the one word valid on either axis
             case "flag": cargs["op"] = rest.Count > 0 ? rest[0] : "toggle"; break; // on|off|toggle|clear
-            case "bind": cargs["agent"] = rest.Count > 0 ? rest[0] : "claude"; break; // bind a resumable agent (claude) | none to clear
+            case "bind":
+                cargs["agent"] = rest.Count > 0 ? rest[0] : "claude";
+                if (Opt("resume") is { } resumeId) cargs["resume"] = resumeId;
+                if (Opt("pid") is { } hookPid && int.TryParse(hookPid, out int hp)) cargs["pid"] = hp;
+                if (Opt("cwd") is { } hookCwd) cargs["cwd"] = hookCwd;
+                break;
             case "restore": cargs["command"] = rest.Count > 0 ? string.Join(' ', rest) : (Opt("command") ?? ""); break; // pin a per-pane restore command | none to clear
             case "background": // session background set <path> [--opacity N] [--mode fit|fill|center|tile] | background clear
                 cargs["action"] = rest.Count > 0 ? rest[0] : "set";
@@ -652,13 +657,13 @@ switch (area)
 
 // install.skill is a self-contained file-write (writes SKILL.md to ~/.claude & ~/.codex); run it
 // locally so it works with no running app / pipe (e.g. from the installer, incl. silent installs).
-if (cmd == "install.skill")
+if (cmd == "install.skill" && target is null && Opt("window") is null)
 {
     Console.WriteLine(Agwinterm.Pty.AgentSkill.Install());
     return 0;
 }
 // install.cli (PATH edit) and omp.list (file enumeration) are self-contained too — run locally.
-if (cmd == "install.cli")
+if (cmd == "install.cli" && target is null && Opt("window") is null)
 {
     Console.WriteLine(options.ContainsKey("remove")
         ? Agwinterm.Pty.CliInstaller.Uninstall() : Agwinterm.Pty.CliInstaller.Install());

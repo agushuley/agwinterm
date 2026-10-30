@@ -1,5 +1,7 @@
 # User guide
 
+For Linux sessions, see [WSL setup and integration](wsl.md).
+
 ## Agent-first
 
 - **Workspaces → sessions → panes** in a custom-drawn sidebar: drag-reorder, rename, flag, focus,

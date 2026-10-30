@@ -222,7 +222,7 @@ internal partial class Program
     private static string? CurrentDirOf(Ses s)
     {
         var live = SafeCwd(s);
-        if (!string.IsNullOrWhiteSpace(live)) { var p = PrettyCwd(live); if (Directory.Exists(p)) return p; }
+        if (!string.IsNullOrWhiteSpace(live)) { var p = PrettyCwd(live); if (WslIntegration.IsWsl(ResolveProfile(s.ProfileName)?.Command) || Directory.Exists(p)) return p; }
         return s.ActivePane.StartCwd;
     }
 
@@ -260,13 +260,7 @@ internal partial class Program
     }
 
     private static string PrettyCwd(string raw)
-    {
-        if (string.IsNullOrEmpty(raw)) return "";
-        string s = raw;
-        if (s.StartsWith("file://")) { s = s[7..]; int slash = s.IndexOf('/'); if (slash > 0) s = s[slash..]; }
-        try { s = Uri.UnescapeDataString(s); } catch { }
-        return s.TrimStart('/').Replace('/', '\\');
-    }
+        => WslIntegration.DecodeCwd(raw);
 
     private static float MeasureText(string s, IDWriteTextFormat fmt)
     {
@@ -1562,12 +1556,31 @@ internal partial class Program
     /// </summary>
     private bool CaptureCommandsIntoPanes(IEnumerable<Ses> sessions)
     {
-        var panes = sessions.SelectMany(s => PanesOf(s)).ToList();
-        if (!TryCaptureForegroundCommands(panes.Select(p => p.S.ChildProcessId).Where(id => id is > 0).Select(id => id!.Value), timeoutMs: 4000, out var cmdByPid))
+        var snapshot = sessions.SelectMany(s => PanesOf(s).Select(p => (pane: p, ses: s, pid: p.S.ChildProcessId ?? 0))).ToList();
+        var panes = snapshot.Select(s => s.pane);
+        if (!TryCapturePaneCommands(snapshot, 4000, out var cmdByPid))
             return false;   // nothing known, nothing touched: the earlier checkpoints stand
         foreach (var p in panes)
             p.CapturedCommand = p.S.ChildProcessId is int pid && cmdByPid.TryGetValue(pid, out var c) ? c : null;
         return true;
+    }
+
+    private static bool TryCapturePaneCommands(IEnumerable<(Pane pane, Ses ses, int pid)> snapshot, int timeoutMs,
+        out Dictionary<int, string> result)
+    {
+        var entries = snapshot.Select(s => (s.pane, s.pid, profile: ResolveProfile(s.ses.ProfileName))).ToList();
+        if (!TryCaptureForegroundCommands(entries.Where(e => !WslIntegration.IsWsl(e.profile?.Command)).Select(e => e.pid).Where(p => p > 0), timeoutMs, out result)) return false;
+        try
+        {
+            foreach (var group in entries.Where(e => WslIntegration.IsWsl(e.profile?.Command) && e.pid > 0).GroupBy(e => e.profile))
+            {
+                var commands = WslIntegration.Foreground(group.Key!, group.Select(e => e.pane.Id), LoadDenylist(), timeoutMs);
+                foreach (var entry in group)
+                    if (commands.TryGetValue(entry.pane.Id, out string? command)) result[entry.pid] = command;
+            }
+            return true;
+        }
+        catch { result.Clear(); return false; }
     }
 
     // The one writer every window shares (StateWriter has the why: #294, a rename held by an
@@ -1931,9 +1944,9 @@ internal partial class Program
                             string lead = StripExe(cmd.TrimStart('"').Split(' ', 2)[0]);
                             if (deny.Contains(lead)) continue;
                             var pane = ses.Panes[i];
-                            // Prefix the call operator: a captured command line starts with a quoted exe
-                            // path, which pwsh would otherwise parse as a bare string literal.
-                            string run = "& " + cmd;
+                            // Windows captures need PowerShell's call operator for quoted exe paths.
+                            // Linux captures are already shell commands; a leading & is invalid in Bash.
+                            string run = WslIntegration.IsWsl(ResolveProfile(ses.ProfileName)?.Command) ? cmd : "& " + cmd;
                             _ = Task.Run(async () =>
                             {
                                 await Task.Delay(2500); // let the shell/profile settle; pwsh buffers stdin until ready

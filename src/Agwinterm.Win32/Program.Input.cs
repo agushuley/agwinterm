@@ -188,22 +188,33 @@ internal partial class Program
     }
 
     /// <summary>Install the $PROFILE OSC-7 shell integration off the UI thread, then toast the result.</summary>
-    private void InstallShellIntegration() => RunInstaller(Agwinterm.Pty.ShellIntegrationInstaller.Install);
+    private void InstallShellIntegration() => InstallIntegration("shell");
 
     /// <summary>Opt-in: add agwintermctl to the user PATH (agterm's "Install Command Line Tool").</summary>
-    private void InstallCli() => RunInstaller(Agwinterm.Pty.CliInstaller.Install);
+    private void InstallCli() => InstallIntegration("cli");
     /// <summary>Opt-in: install Claude Code / Codex / Devin / generic agent status hooks.</summary>
-    private void InstallHooks() => RunInstaller(Agwinterm.Pty.AgentHooks.Install);
+    private void InstallHooks() => InstallIntegration("hooks");
     /// <summary>Migrate pre-launcher Claude sessions: bind each pane to resume its current conversation.</summary>
     private void MakeClaudeResumable() => ShowToast(AdoptClaudeSessions(), 3200);
     /// <summary>Restart the active pane's Claude in YOLO mode (--dangerously-skip-permissions), resumed.</summary>
     private void RestartClaudeYoloActive() { var p = ActiveSurface(); ShowToast(p is null ? "no active pane" : RestartClaudeYolo(p), 2500); }
     /// <summary>Opt-in: install the agent skill (teaches agents to drive agwinterm via agwintermctl).</summary>
-    private void InstallSkill() => RunInstaller(Agwinterm.Pty.AgentSkill.Install);
+    private void InstallSkill() => InstallIntegration("skill");
+
+    private void InstallIntegration(string kind)
+    {
+        var profile = IntegrationProfileOnUi(_active?.Id);
+        RunInstaller(() => WslIntegration.Install(profile, kind));
+    }
 
     /// <summary>Run an installer off the UI thread and toast its result.</summary>
     private void RunInstaller(Func<string> installer)
-        => System.Threading.Tasks.Task.Run(() => { string r = installer(); Post(() => ShowToast(r)); });
+        => System.Threading.Tasks.Task.Run(() =>
+        {
+            string r;
+            try { r = installer(); } catch (Exception ex) { r = "Installation failed: " + ex.Message; }
+            Post(() => ShowToast(r));
+        });
 
     /// <summary>Run a configured custom command per its mode (send|new|overlay|detached), expanding {AGW_*}.</summary>
     private void RunCustomCommand(Keymap.CmdDef cmd)
@@ -226,7 +237,7 @@ internal partial class Program
         {
             case "new":
                 CreateSession(Guid.NewGuid().ToString(), null, RawCwdOf(ctx), ActiveWorkspace(), makeActive: true,
-                    command: expanded, interactive: true, extraEnv: AgwEnv(ctx));
+                    command: expanded, interactive: true, extraEnv: AgwEnv(ctx), profileName: ctx?.ProfileName);
                 break;
             case "overlay":
                 if (ctx is not null) OverlayOpen(ctx, null, expanded, 0, false, AgwEnv(ctx));
@@ -334,14 +345,20 @@ internal partial class Program
     {
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+            var profile = ResolveProfile(_active?.ProfileName);
+            bool wsl = profile is not null && WslIntegration.IsWsl(profile.Command);
+            var psi = new System.Diagnostics.ProcessStartInfo(wsl ? profile!.Command : "cmd.exe")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = string.IsNullOrWhiteSpace(cwd) ? "" : cwd!,
+                WorkingDirectory = wsl || string.IsNullOrWhiteSpace(cwd) ? "" : cwd!,
             };
-            psi.ArgumentList.Add("/c");
-            psi.ArgumentList.Add(command);
+            if (wsl)
+            {
+                WslIntegration.ExportEnvironment(env);
+                foreach (string arg in WslIntegration.CommandArgs(profile!, command, cwd, false)) psi.ArgumentList.Add(arg);
+            }
+            else { psi.ArgumentList.Add("/c"); psi.ArgumentList.Add(command); }
             foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
             System.Diagnostics.Process.Start(psi);
         }
@@ -594,6 +611,12 @@ internal partial class Program
         if (u.Scheme is "http" or "https") { ShellExecuteW(IntPtr.Zero, "open", url, null, null, SW_SHOW); return; }
         if (u.Scheme == "file")
         {
+            if (WslIntegration.IsWsl(ResolveProfile(_active?.ProfileName)?.Command)
+                && WslIntegration.DecodeCwd(url) is { } linuxPath && linuxPath.StartsWith('/'))
+            {
+                RevealLinuxPath(linuxPath, select: false);
+                return;
+            }
             string path = u.LocalPath;
             try
             {
@@ -610,6 +633,38 @@ internal partial class Program
     }
 
     // ---- Text selection + clipboard ----
+
+    private void RevealLinuxPath(string path, bool select)
+    {
+        var profile = IntegrationProfileOnUi(_active?.Id);
+        if (profile is null) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                string windowsPath = WslIntegration.WindowsPath(profile, path);
+                if (!Directory.Exists(windowsPath) && !File.Exists(windowsPath)) throw new IOException("path not found: " + path);
+                var psi = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+                if (select || File.Exists(windowsPath)) psi.ArgumentList.Add("/select,");
+                psi.ArgumentList.Add(windowsPath);
+                System.Diagnostics.Process.Start(psi);
+            }
+            catch (Exception ex) { Post(() => ShowToast("reveal failed: " + ex.Message)); }
+        });
+    }
+
+    private void PasteWslPaths(Pane target, ShellProfile profile, IReadOnlyList<string> paths)
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                string text = WslIntegration.QuotedLinuxPaths(profile, paths);
+                Post(() => { if (FindControlPane(target.Id) is { } hit && ReferenceEquals(hit.pane, target)) PasteTextInto(target, text); });
+            }
+            catch (Exception ex) { Post(() => ShowToast("drop failed: " + ex.Message)); }
+        });
+    }
 
     /// <summary>The SURFACE of the active session under a client point + its origin/metrics, or null:
     /// a shown cover (it takes the whole content region), else the pane under the point — and, while

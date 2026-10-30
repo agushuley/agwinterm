@@ -13,5 +13,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Agwinterm.Pty.Tests" />
+    <EmbeddedResource Include="Wsl/*" />
   </ItemGroup>
 </Project>

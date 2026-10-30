@@ -150,7 +150,23 @@ internal partial class Program
                            new Microsoft.Win32.SafeHandles.SafeFileHandle(h.Signal, true), h.Client, h.ClientPid);
         else if (adopted) { /* reattached to the surviving shell — nothing to launch */ }
         else if (sessionCommand is { } launch)
+        {
+            if (WslIntegration.IsWsl(launch.App))
+            {
+                WslIntegration.ExportEnvironment(env);
+                launch = launch with { Args = WslIntegration.LaunchArgs(launch.Args, cwd) };
+                cwd = null;
+            }
             pane.Start = session.StartAsync(launch.App, launch.QuotedArgs, verbatimCommandLine: true, extraEnv: env, cwd: cwd, freshEnv: _config.FreshEnv);
+        }
+        else if (!string.IsNullOrWhiteSpace(command) && ResolveProfile(profileName) is { } commandProfile
+            && WslIntegration.IsWsl(commandProfile.Command))
+        {
+            WslIntegration.ExportEnvironment(env);
+            var argv = WslIntegration.CommandArgs(commandProfile, command, cwd, interactive);
+            pane.Start = session.StartAsync(commandProfile.Command, new SessionCommand(commandProfile.Command, argv).QuotedArgs,
+                verbatimCommandLine: true, extraEnv: env, freshEnv: _config.FreshEnv);
+        }
         else if (!string.IsNullOrWhiteSpace(command) && interactive)
             // Run the command in a fresh shell that STAYS OPEN afterwards (custom-command "new" mode):
             // the user's profile loads (oh-my-posh etc.), the command runs, then it's an interactive shell.
@@ -253,9 +269,18 @@ internal partial class Program
         string? pcwd = string.IsNullOrEmpty(cwd) ? prof?.Cwd : cwd;
         // Per-profile env vars (WT parity). AGWINTERM_* set by CreatePane win, so profile env can't
         // clobber our identity vars; a custom-command's $AGW_* extraEnv still overrides last.
-        if (prof?.Env is { Count: > 0 } penv)
+        // WSL profile variables belong to Linux. In particular its PATH must not replace
+        // the Windows PATH used to locate wsl.exe and its interop dependencies.
+        if (!WslIntegration.IsWsl(cmd) && prof?.Env is { Count: > 0 } penv)
             foreach (var kv in penv) if (!kv.Key.StartsWith("AGWINTERM", StringComparison.OrdinalIgnoreCase)) env[kv.Key] = kv.Value;
         string exe = Path.GetFileName(cmd).ToLowerInvariant();
+        if (WslIntegration.IsWsl(cmd))
+        {
+            if (prof?.Env?.TryGetValue("WSLENV", out string? wslenv) == true) env["WSLENV"] = wslenv;
+            WslIntegration.ExportEnvironment(env);
+            pargs = WslIntegration.LaunchArgs(pargs, pcwd, prof?.Env);
+            pcwd = null; // Linux cwd belongs to wsl --cd, never CreateProcessW.
+        }
         bool isPwsh = exe is "powershell.exe" or "pwsh.exe" or "pwsh";
         if (isPwsh && (pargs is null || pargs.Length == 0))
             _ = session.StartAsync(cmd, ShellArgs(), extraEnv: env, cwd: pcwd, deElevate: deElevate, freshEnv: _config.FreshEnv);        // wrap + omp (cwd-in-title)
@@ -409,18 +434,20 @@ internal partial class Program
         catch (Exception ex) { ShowToast("elevated launch failed: " + ex.Message); }
     }
 
-    /// <summary>Resolve spawn cwd: explicit, then workspace default when the path exists, then global new-session-dir mode.</summary>
-    private string? ResolveNewSessionCwd(Workspace ws, string? explicitCwd)
+    /// <summary>Resolve spawn cwd: explicit, existing workspace default, profile directory, then global new-session-dir mode.</summary>
+    private string? ResolveNewSessionCwd(Workspace ws, string? explicitCwd, ShellProfile? profile)
     {
         if (!string.IsNullOrEmpty(explicitCwd)) return explicitCwd;
         if (!string.IsNullOrWhiteSpace(ws.DefaultDir) && Directory.Exists(ws.DefaultDir)) return ws.DefaultDir;
+        if (WslIntegration.ProfileDirectory(profile) is { Length: > 0 } profileCwd) return profileCwd;
+        bool wsl = WslIntegration.IsWsl(profile?.Command);
         string? want = _config.NewSessionDirMode switch
         {
             "current" => _active is not null ? CurrentDirOf(_active) : null,
             "custom" => _config.NewSessionDir,
-            _ /*home*/ => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            _ /*home*/ => wsl ? "~" : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-        if (!string.IsNullOrWhiteSpace(want) && Directory.Exists(want)) return want;
+        if (!string.IsNullOrWhiteSpace(want) && (wsl || Directory.Exists(want))) return want;
         return null;
     }
 
@@ -461,7 +488,8 @@ internal partial class Program
             return _active ?? ws.Sessions.FirstOrDefault() ?? CreateSession(id, name, cwd, ws, makeActive, fontSize, command, interactive, extraEnv, null);
         }
         float fs = fontSize is > 0 ? fontSize.Value : (float)_config.FontSize;
-        cwd = ResolveNewSessionCwd(ws, cwd);
+        profileName ??= ResolveProfile(null)?.Name;
+        cwd = ResolveNewSessionCwd(ws, cwd, ResolveProfile(profileName));
         int ordinal;
         lock (_workspaces) ordinal = ws.Sessions.Count + 1;
         if (name is null && handoff is { Title.Length: > 0 } ht) name = ht.Title;   // label handoff sessions with the app's title
@@ -830,7 +858,7 @@ internal partial class Program
         if (!OwnsSession(ses)) return;
         if (ses.Scratch is null)
         {
-            ses.Scratch = CreatePane(ses.Id + ":scratch:" + Guid.NewGuid().ToString("N")[..6], ses.Ws, CwdOf(ses), ses.FontSize);
+            ses.Scratch = CreatePane(ses.Id + ":scratch:" + Guid.NewGuid().ToString("N")[..6], ses.Ws, CwdOf(ses), ses.FontSize, profileName: ses.ProfileName);
             ses.Scratch.FontZoomed = ses.ActivePane.FontZoomed;
         }
         ShowCover(ses.Scratch, 1);
@@ -893,7 +921,7 @@ internal partial class Program
             id = pane.Id + ":overlay:" + Guid.NewGuid().ToString("N")[..6];
         }
         var owner = pane ?? ses.ActivePane;
-        var term = CreatePane(id, ses.Ws, CwdOf(owner), owner.FontSize, command, shellWrap: true, extraEnv: extraEnv);
+        var term = CreatePane(id, ses.Ws, CwdOf(owner), owner.FontSize, command, shellWrap: true, extraEnv: extraEnv, profileName: ses.ProfileName);
         term.FontZoomed = owner.FontZoomed;
         term.OverlayDone = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         // The slot's LAST exit is reset by every open, and the new term becomes the slot's overlay in
@@ -1057,7 +1085,7 @@ internal partial class Program
     private static string PaneCwd(Pane p)
     {
         string cwd = PrettyCwd(SafeCwd(p));
-        if (string.IsNullOrWhiteSpace(cwd) || !Directory.Exists(cwd)) cwd = p.StartCwd ?? "";
+        if (string.IsNullOrWhiteSpace(cwd) || (!cwd.StartsWith('/') && !Directory.Exists(cwd))) cwd = p.StartCwd ?? "";
         return cwd;
     }
 
@@ -1673,7 +1701,7 @@ internal partial class Program
             ws = _workspaces.FirstOrDefault(w => w.Id == c.WorkspaceId)
                  ?? _workspaces.FirstOrDefault(w => string.Equals(w.Name, c.WorkspaceName, StringComparison.OrdinalIgnoreCase))
                  ?? ActiveWorkspace();
-        string? cwd = !string.IsNullOrEmpty(c.Cwd) && Directory.Exists(c.Cwd) ? c.Cwd : null;
+        string? cwd = !string.IsNullOrEmpty(c.Cwd) && (WslIntegration.IsWsl(ResolveProfile(c.ProfileName)?.Command) || Directory.Exists(c.Cwd)) ? c.Cwd : null;
         var ses = CreateSession(StableSessionId(c.SessionId), null, cwd, ws, makeActive: true, profileName: c.ProfileName);
         if (!string.IsNullOrEmpty(c.CustomName)) { ses.CustomName = c.CustomName; ses.Name = c.CustomName!; } // mirror rename
         else if (!string.IsNullOrEmpty(c.Name)) ses.Name = c.Name;   // restore the original label
@@ -1692,7 +1720,7 @@ internal partial class Program
         Ses? first = null;
         foreach (var cs in c.Sessions)
         {
-            string? cwd = !string.IsNullOrEmpty(cs.Cwd) && Directory.Exists(cs.Cwd) ? cs.Cwd : null;
+            string? cwd = !string.IsNullOrEmpty(cs.Cwd) && (WslIntegration.IsWsl(ResolveProfile(cs.ProfileName)?.Command) || Directory.Exists(cs.Cwd)) ? cs.Cwd : null;
             var ses = CreateSession(StableSessionId(cs.SessionId), null, cwd, ws, makeActive: false, profileName: cs.ProfileName);
             if (!string.IsNullOrEmpty(cs.CustomName)) { ses.CustomName = cs.CustomName; ses.Name = cs.CustomName!; }
             else if (!string.IsNullOrEmpty(cs.Name)) ses.Name = cs.Name;

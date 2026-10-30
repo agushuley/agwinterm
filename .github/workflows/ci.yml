@@ -2,15 +2,39 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, narma ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, narma ]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  wsl-hook:
+    uses: ./.github/workflows/wsl-hook.yml
+
+  portable:
+    name: portable WSL payload
+    needs: wsl-hook
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wsl-hook-*
+          merge-multiple: true
+          path: artifacts/wsl-hook
+      - name: Build portable with both Linux architectures
+        shell: pwsh
+        run: ./installer/build-portable.ps1
+      - name: Verify the standalone portable payload
+        shell: pwsh
+        run: ./tests/integration/portable-tools.ps1
+
   build-test:
     name: build + test (windows)
     runs-on: windows-latest
