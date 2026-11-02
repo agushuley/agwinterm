@@ -192,7 +192,7 @@ internal partial class Program
 
     /// <summary>Opt-in: add agwintermctl to the user PATH (agterm's "Install Command Line Tool").</summary>
     private void InstallCli() => RunInstaller(Agwinterm.Pty.CliInstaller.Install);
-    /// <summary>Opt-in: install Claude Code / Codex / generic agent status hooks.</summary>
+    /// <summary>Opt-in: install Claude Code / Codex / Devin / generic agent status hooks.</summary>
     private void InstallHooks() => RunInstaller(Agwinterm.Pty.AgentHooks.Install);
     /// <summary>Migrate pre-launcher Claude sessions: bind each pane to resume its current conversation.</summary>
     private void MakeClaudeResumable() => ShowToast(AdoptClaudeSessions(), 3200);
@@ -1188,6 +1188,7 @@ internal partial class Program
         // A --wait overlay whose program has exited hangs around; any key dismisses it — the cover,
         // else the focused pane's own overlay (P5).
         if (CloseExitedOverlayOnKey()) return true;
+        if (vk == VK_RETURN && TryCloseExitHoldOnEnter()) return true;
 
         // Escape during an MRU walk cancels back to where the walk began.
         if (_mruWalking && vk == VK_ESCAPE) { MruCancel(); return true; }
@@ -1299,7 +1300,7 @@ internal partial class Program
         // F10 focuses the menu bar when nothing bound it — a keymap chord or the leader on F10 was
         // dispatched above and never reaches here — and when the pane is not a full-screen program:
         // one on the alternate screen or reporting the mouse (mc, htop, far, nano) gets its F10, as
-        // it does in Windows Terminal; the Alt tap and Alt+letter still reach the bar there.
+        // it does in Windows Terminal; the Alt tap still reaches the bar there.
         if (vk == 0x79 /* F10 */ && !ctrl && !alt && !shift && MenuBarUsable
             && ActiveSurface()?.S.Emulator is not ({ IsAltScreen: true } or { MouseReporting: true }))
         { FocusMenuBar(0); return true; }

@@ -12,6 +12,10 @@ Builds **per-user** Windows installers — end users need **no** .NET runtime in
 Each setup ships its own copy of the shared `agwinterm-ptyhost.exe` + `agwinterm_core.dll`, so
 either installs (and uninstalls) cleanly without the other.
 
+The agwinterm setup also carries Microsoft's ConPTY, `conpty.dll` + `x64\OpenConsole.exe` from the
+`Microsoft.Windows.Console.ConPTY` NuGet package (MIT), which `dotnet publish` puts in the stage. Both the app
+and `agwinterm-ptyhost.exe` load it from their own directory, and fall back to the inbox conhost without it.
+
 ## Build
 
 ```powershell
@@ -53,9 +57,11 @@ They do **not** touch your `PATH`, profile, or config.
 Open the action palette (**Ctrl+Shift+P**) and run the **Install …** entries when you want them:
 
 - **Install Command-Line Tool (PATH)** — adds `agwintermctl` to your user `PATH` (so shells & AI agents can call it).
-- **Install Agent Status Hooks** — Claude Code / Codex / generic-agent status reporting, plus a
+- **Install Agent Status Hooks** — Claude Code / Codex / Devin / generic-agent status reporting, plus a
   transparent `claude` launcher that binds Claude's session id to the agwinterm pane so restart
-  auto-resumes the conversation.
+  auto-resumes the conversation. When an existing Devin JSONC config needs changes, its exact original
+  is kept in a numbered `.agwinterm.bak` sibling before the active config is rewritten as JSON without
+  comments or formatting.
 - **Install Agent Skill** — teaches agents to drive agwinterm via `agwintermctl`.
 - **Install Shell Integration** — a `$PROFILE` OSC-7 hook for live cwd (also works out of the box without this).
 

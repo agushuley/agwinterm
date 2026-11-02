@@ -9,16 +9,23 @@
   double-click to jump in; or drive it with `agwintermctl dashboard <ids>`.
 - **Agent status** per session (idle / active / blocked / completed) as a colored dot and a title-bar
   bell, driven by your agent via hooks or the control API, with blink, auto-reset, and sounds. Run
-  `agwintermctl install hooks` (or the palette entry) once to wire Claude Code / Codex up.
-- **Claude Code and Codex session binding & auto-resume**: the same installer adds a `SessionStart`
-  hook to both agents. Each time a session starts, resumes, is cleared or compacts, the hook tells
-  agwinterm the live session id and directory, and agwinterm stores the line that resumes it in the
-  pane's own shell: `cd '<dir>' && claude --resume <id>` in Git Bash, `Set-Location -LiteralPath
-  '<dir>'; codex resume <id>` in PowerShell, `cd /d` in cmd. The permission or sandbox mode it was
-  started with (`--dangerously-skip-permissions`, `--permission-mode`, Codex's `--sandbox`,
-  `--ask-for-approval`, `--profile`) is kept. On restart, even after a reboot, agwinterm types that line
-  into each bound pane and the conversation comes back. A `claude -p` or `codex exec` an agent runs
-  from its own tool shell does not rebind the pane. Codex runs a new hook only after you trust it
+  `agwintermctl install hooks` (or the palette entry) once to wire Claude Code / Codex / Devin up.
+  When an existing Devin JSONC config needs changes, the installer keeps its exact original in a
+  numbered `.agwinterm.bak` sibling, then rewrites the active config as JSON without comments or
+  formatting.
+- **Claude Code, Codex and Devin session binding & auto-resume**: the same installer adds a
+  `SessionStart` hook to each agent. Each time a session starts, resumes, is cleared or compacts, the
+  hook tells agwinterm the live session id and directory, and agwinterm stores the line that resumes it
+  in the pane's own shell: `cd '<dir>' && claude --resume <id>` in Git Bash, `Set-Location -LiteralPath
+  '<dir>'; codex resume <id>` in PowerShell, `cd /d` in cmd (a directory whose name that shell's quotes
+  cannot hold, such as one with `%` or `"` in cmd, is left out and only the resume is stored). Devin
+  does not report its directory, so its line changes to Devin's project directory (`DEVIN_PROJECT_DIR`,
+  the repository root). The permission or sandbox mode it was started with
+  (`--dangerously-skip-permissions`, `--permission-mode`, Codex's `--sandbox`, `--ask-for-approval`,
+  `--profile`, Devin's `--permission-mode`, `--sandbox`) is kept. On restart, even after a reboot,
+  agwinterm types that line into each bound pane and the conversation comes back. A `claude -p`,
+  `codex exec` or `devin -p` an agent runs from its own tool shell does not rebind the pane, nor does a
+  `devin -p` run in the pane itself. Codex runs a new hook only after you trust it
   once in Codex's `/hooks`, and Codex fires it on a session's first turn. For PowerShell the installer
   also adds a transparent `claude` wrapper (active only inside agwinterm) that starts a fresh pane's
   session under the pane id. Already had Claude running before installing this? Run
@@ -58,8 +65,16 @@
   (toggleable), builtin box-drawing glyphs, buffer restore, block selection and keyboard mark mode,
   read-only panes, elevated and de-elevated sessions side by side (⚡ marker), FTCS/OSC-133 prompt
   marks with jump-to-prompt, taskbar progress (OSC 9;4).
+- **Microsoft's ConPTY (opt-in)**: with `conpty = bundled` in `agwinterm.conf`, sessions run on the
+  `conpty.dll` + `OpenConsole.exe` that ship with agwinterm (the ConPTY Windows Terminal uses), not the conhost
+  built into Windows. It hands an app's output to agwinterm unchanged and passes its queries through, so
+  agwinterm answers them itself: the theme colors (OSC 10/11, which Codex uses to shade your messages), device
+  attributes and the cursor position. It is not the default because it does not repaint after a resize: a pane
+  that changes width shows clipped lines and misplaced text until the app redraws. The default, `conpty =
+  inbox`, is the built-in conhost. The portable exe carries neither file and always uses it.
 - Shells are launched with `TERM_PROGRAM=agwinterm` (plus the usual `AGWINTERM_*` variables), so prompt
-  engines, tmux and scripts can detect the host terminal.
+  engines, tmux and scripts can detect the host terminal, and with `COLORTERM=truecolor`, so apps that size
+  their palette from the environment use 24-bit color.
 - **Git Bash working directory**: PowerShell panes report their directory out of the box. A Git Bash
   (or MSYS2) pane does it with a few lines in `~/.bashrc`, so the title shows the directory and the pane
   restores in it after a restart (agwinterm 0.20.11 or later, earlier builds also raised a notification):
@@ -71,6 +86,13 @@
     PROMPT_COMMAND="__agw_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
   fi
   ```
+- When a **normal profile / login-shell** tab’s process exits, its exit code appears in the session's
+  accessible name and unread badge tooltip. A background exit sends an `ok` notification for code 0 or
+  `attention` for a non-zero code. The exited shell remains visible; tabs started with
+  `session new --command` are unchanged.
+- Exited profile/login shells print `Press Enter to close the session.` in the terminal. Enter closes
+  that tab without the generic close-confirmation dialog; manual closes still follow
+  `confirm-close-session`.
 
 ## Accessible — screen readers are first-class
 
@@ -108,11 +130,13 @@ Window** (the window library, a check mark on the open ones) and **File ▸ Open
 sessions and workspaces).
 
 It takes the Windows keyboard model: a lone **Alt** tap or **F10** focuses the bar (←/→ move, ↓ or
-Enter opens, Esc leaves), **Alt+F / Alt+V / Alt+N / Alt+H** open a menu directly, and inside an open
-menu ←/→ switch menus. A `keymap.conf` binding on an Alt+letter chord wins over the mnemonic, so a
-shell that wants Alt+F keeps it by binding it. The bar is a UIA menu bar, so a screen reader reads
-and runs it. `show-menu-bar = false` in `agwinterm.conf` (or `agwintermctl config set show-menu-bar
-false`) removes it; the hidden toolbar mode shows no chrome and so no bar.
+Enter opens, **F / V / N / H** open that menu, Esc leaves), and inside an open menu ←/→ or
+**Alt+F / Alt+V / Alt+N / Alt+H** switch menus. From the terminal, Alt+letter goes to the program in
+the pane (Claude Code pastes an image on Alt+V), so **Alt, V** rather than Alt+V opens View; from the
+session list (F6), the dashboard or the find bar Alt+F / Alt+V / Alt+N / Alt+H open a menu directly
+unless `keymap.conf` binds them. The bar is a UIA menu bar, so a screen reader reads and runs it. `show-menu-bar = false` in `agwinterm.conf` (or
+`agwintermctl config set show-menu-bar false`) removes it; the hidden toolbar mode shows no chrome
+and so no bar.
 
 agterm's items that have no agwinterm counterpart are left out rather than invented: Edit / Reload
 Hooks, Toggle Terminal Zoom, Reset Live Sessions, and the focus-set items (Add Workspace to Focus,
@@ -129,7 +153,7 @@ Toggle Workspace Filter, Clear Focus — agwinterm's workspace focus is one work
 | `Ctrl+Tab` | MRU session switcher |
 | `Ctrl+D` | Split pane · `` Ctrl+` `` quick terminal · `Ctrl+J` scratch |
 | `Ctrl+Shift+P` | Action palette |
-| `Alt` (tap) / `F10` | Menu bar · `Alt+F` `Alt+V` `Alt+N` `Alt+H` open a menu |
+| `Alt` (tap) / `F10` | Menu bar · then `F` `V` `N` `H` open a menu |
 | `F11` | Fullscreen |
 
 Most built-in actions can be rebound in `keymap.conf` (see `F1` for the live, effective list). Some

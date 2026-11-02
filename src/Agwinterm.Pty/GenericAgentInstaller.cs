@@ -21,7 +21,7 @@ public static class GenericAgentInstaller
         """
         if ($env:AGWINTERM -eq '1' -and -not $global:__agwAgent) {
           $global:__agwAgent = $true
-          if (-not $env:AGWINTERM_AGENT_RE) { $env:AGWINTERM_AGENT_RE = 'claude|codex|aider|gemini|cursor|copilot|goose|opencode|amp|pi' }
+          if (-not $env:AGWINTERM_AGENT_RE) { $env:AGWINTERM_AGENT_RE = 'claude|codex|devin|aider|gemini|cursor|copilot|goose|opencode|amp|pi' }
           function global:__agwStatus([string]$s) {
             if (-not $env:AGWINTERM_SESSION_ID) { return }
             $pipe = if ($env:AGWINTERM_PIPE) { $env:AGWINTERM_PIPE } else { 'agwinterm' }

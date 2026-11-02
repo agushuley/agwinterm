@@ -81,6 +81,16 @@ public class TerminalConfigTests
     }
 
     [Fact]
+    public void Conpty_DefaultsToInbox_ParsesBundled_RejectsUnknown()
+    {
+        Assert.Equal("inbox", TerminalConfig.Parse("").Conpty);
+        Assert.Equal("bundled", TerminalConfig.Parse("conpty = bundled").Conpty);
+        Assert.Equal("inbox", TerminalConfig.Parse("conpty = inbox").Conpty);
+        Assert.Equal("inbox", TerminalConfig.Parse("conpty = bogus").Conpty);
+        Assert.Equal("inbox", TerminalConfig.Parse(TerminalConfig.DefaultText).Conpty);
+    }
+
+    [Fact]
     public void UpdateCheck_ParsesAndIsDocumented()
     {
         Assert.True(TerminalConfig.Parse("").UpdateCheck);         // default: awareness on, applying stays manual

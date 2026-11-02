@@ -37,6 +37,13 @@ namespace Agwinterm.Win32ControlTest
         public static extern IntPtr SendMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+
+        public static void PostReturn(IntPtr h) {
+            PostMessageW(h, 0x0100, (IntPtr)0x0D, (IntPtr)1);
+            PostMessageW(h, 0x0102, (IntPtr)0x0D, (IntPtr)1);
+            PostMessageW(h, 0x0101, (IntPtr)0x0D, (IntPtr)1);
+        }
+
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
@@ -240,6 +247,8 @@ try {
     Check 'the Win32 instance did not fall back to the environment app-id' `
         (-not (Test-Path -LiteralPath $envAppDir)) "--app-id was ignored; state went to $envAppDir"
     if (-not $appDataAdopted) { throw 'isolated instance did not seed its dedicated app-data directory' }
+
+    . (Join-Path $PSScriptRoot 'workspace-default-dir-cases.ps1')
 
     # Reproduce the collision from the review: the initial pane shares the session id; a hidden
     # scratch id begins with that id. Once the initial side of a split exits, only the exact session
@@ -497,6 +506,46 @@ try {
         "reply=$($scRefused | ConvertTo-Json -Compress)"
     Invoke-Ctl @('session', 'close', $scId) | Out-Null
     $scId = $null
+
+    # A split opens where the pane is NOW, not where it was launched: two agents side by side that
+    # share files in one folder must not start in two. The shell reports its cwd with OSC 9;9 (what
+    # a prompt hook sends), the marker after it on the same output proves the report was parsed, and
+    # the new pane prints its own location. Leaf names only: a long temp path wraps in a half pane.
+    # Both markers are split in the typed text, so its echo never satisfies the wait.
+    $cwdTag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $cwdRoot = Join-Path ([IO.Path]::GetTempPath()) ("agw-split-cwd-$cwdTag")
+    $cwdHere = Join-Path $cwdRoot "here-$cwdTag"
+    New-Item -ItemType Directory -Force -Path $cwdHere | Out-Null
+    $cwdMade = Invoke-Ctl @('session', 'new', '--name', 'split-live-cwd', '--cwd', $cwdRoot, '--no-select')
+    $cwdId = [string]$cwdMade.result
+    for ($i = 0; $i -lt 30 -and -not (Get-SessionSnapshot $cwdId); $i++) { Start-Sleep -Milliseconds 200 }
+    $cwdMarker = "cwd-reported-$cwdTag"
+    $cwdReported = $false
+    foreach ($attempt in 1, 2, 3) {   # typed input can be dropped while the shell starts: type again
+        Invoke-Ctl @('session', 'type', "Set-Location -LiteralPath '$cwdHere'; [Console]::Write([char]27 + ']9;9;' + (Get-Location).Path + [char]7); Write-Output ('cwd-reported-' + '$cwdTag')`r", '--target', $cwdId) | Out-Null
+        for ($i = 0; $i -lt 16; $i++) {
+            Start-Sleep -Milliseconds 250
+            if (([string](Invoke-Ctl @('session', 'text', '--target', $cwdId)).result).Contains($cwdMarker)) { $cwdReported = $true; break }
+        }
+        if ($cwdReported) { break }
+    }
+    $cwdSplit = Invoke-Ctl @('session', 'split', 'on', '--target', $cwdId)
+    $cwdPane = [string]$cwdSplit.result
+    $cwdSeen = ''
+    foreach ($attempt in 1, 2, 3) {
+        Invoke-Ctl @('session', 'type', "Write-Output ('C' + 'WD=' + (Split-Path -Leaf (Get-Location).Path))`r", '--target', $cwdPane) | Out-Null
+        for ($i = 0; $i -lt 16; $i++) {
+            Start-Sleep -Milliseconds 250
+            $cwdSeen = [string](Invoke-Ctl @('session', 'text', '--target', $cwdPane)).result
+            if ($cwdSeen -match 'CWD=\S+') { break }
+        }
+        if ($cwdSeen -match 'CWD=\S+') { break }
+    }
+    Check 'a split pane starts in the live cwd of the pane it splits, not its launch dir' `
+        ($cwdMade.ok -and $cwdReported -and $cwdSplit.ok -and $cwdPane -and $cwdSeen.Contains("CWD=here-$cwdTag")) `
+        "reported=$cwdReported split=$($cwdSplit | ConvertTo-Json -Compress) seen=$([regex]::Match($cwdSeen, 'CWD=\S*').Value)"
+    Invoke-Ctl @('session', 'close', $cwdId) | Out-Null
+    Remove-Item -LiteralPath $cwdRoot -Recurse -Force -ErrorAction SilentlyContinue
 
     if ($survivorId) {
         # While both meanings exist, an exact pane id has priority over the same exact session id.
@@ -1096,6 +1145,50 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
         }
         Check 'session paste <text> --target <a session whose process exited> is refused "the pane''s process has exited" (the session is still listed)' ($p6ExitMade.ok -and $p6ExitPaste -and (-not $p6ExitPaste.ok) -and ([string]$p6ExitPaste.error) -eq "the pane's process has exited" -and (Get-SessionSnapshot $p6Exited)) "new=$($p6ExitMade | ConvertTo-Json -Compress) paste=$($p6ExitPaste | ConvertTo-Json -Compress)"
         if ($p6Exited) { try { Invoke-Ctl @('session', 'close', $p6Exited) | Out-Null } catch { } }
+        # A profile shell exiting in the background raises one unread notification without a hold prompt.
+        $exitMade = Invoke-Ctl @('session', 'new', '--name', 'exit-notification', '--no-select')
+        $exitId = if ($exitMade.ok) { [string]$exitMade.result } else { $null }
+        $exitNode = $null
+        if ($exitId) {
+            for ($i = 0; $i -lt 30 -and -not (Get-SessionSnapshot $exitId); $i++) { Start-Sleep -Milliseconds 200 }
+            Invoke-Ctl @('session', 'type', "exit 42`r", '--target', $exitId) | Out-Null
+            for ($i = 0; $i -lt 40; $i++) {
+                Start-Sleep -Milliseconds 250
+                $exitNode = Get-SessionSnapshot $exitId
+                if ($exitNode -and [int]$exitNode.notifications -ge 1) { break }
+            }
+        }
+        Check 'background profile shell exit keeps its session and raises one unread notification' `
+            ($exitMade.ok -and $exitNode -and [int]$exitNode.notifications -eq 1) "node=$($exitNode | ConvertTo-Json -Compress)"
+        if ($exitId) { try { Invoke-Ctl @('session', 'close', $exitId) | Out-Null } catch { } }
+        # A focused profile shell receives the hold text; Enter dismisses it without a close dialog.
+        $ehMade = Invoke-Ctl @('session', 'new', '--name', 'exit-hold', '--no-select')
+        $ehId = if ($ehMade.ok) { [string]$ehMade.result } else { $null }
+        $ehHoldSeen = $false
+        $ehGone = $false
+        $ehText = ''
+        if ($ehId) {
+            for ($i = 0; $i -lt 30 -and -not (Get-SessionSnapshot $ehId); $i++) { Start-Sleep -Milliseconds 200 }
+            Invoke-Ctl @('session', 'select', '--target', $ehId) | Out-Null
+            Invoke-Ctl @('session', 'type', "exit 42`r", '--target', $ehId) | Out-Null
+            for ($i = 0; $i -lt 40; $i++) {
+                Start-Sleep -Milliseconds 250
+                $ehText = [string](Invoke-Ctl @('session', 'text', '--target', $ehId)).result
+                if ($ehText -match 'Press Enter to close the session') { $ehHoldSeen = $true; break }
+            }
+            if ($ehHoldSeen) {
+                $ehHwnd = $process.MainWindowHandle
+                if ($ehHwnd -ne [IntPtr]::Zero) {
+                    [Agwinterm.Win32ControlTest.NativeMethods]::PostReturn($ehHwnd)
+                    for ($i = 0; $i -lt 20; $i++) {
+                        if (-not (Get-SessionSnapshot $ehId)) { $ehGone = $true; break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                }
+            }
+        }
+        Check 'profile shell exit feeds an in-terminal hold prompt with the exit code' ($ehMade.ok -and $ehHoldSeen -and $ehText -match 'session has ended \(exit 42\)') "new=$($ehMade | ConvertTo-Json -Compress) text-tail=$($ehText.Substring([Math]::Max(0, $ehText.Length - 120)))"
+        Check 'Enter on exit hold closes the session tab (tree no longer lists it)' ($ehHoldSeen -and $ehGone) "id=$ehId"
         # The other slot is empty: copy / text / result name the slot; result on the held slot is "still running".
         $p5CopyLeft = Invoke-Ctl @('session', 'overlay', 'copy', '--pane', 'left', '--target', $p5Id)
         $p5TextLeft = Invoke-Ctl @('session', 'overlay', 'text', '--pane', 'left', '--target', $p5Id)

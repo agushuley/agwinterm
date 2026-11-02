@@ -19,7 +19,7 @@ What it does:
 - **Workspaces and sessions.** Sessions are grouped under named workspaces in a sidebar with drag-reorder, flags, unread badges, multi-select, and reopen for closed sessions and workspaces. A live **dashboard** shows a grid of sessions at once.
 - **Control API and CLI.** `agwintermctl` drives almost everything over a named pipe, with full read-back: the tree with split ratios and pane ids, window state, session output, a pane's caret column, the age of a status.
 - **Splits, scratch, quick terminal and overlays.** Split a session side by side or stacked, open a scratch or a detached quick terminal, run a program in an overlay over a session or over one pane of it, or show a passive HUD.
-- **Agent status and skill.** Agents report their state through hooks or the API as a colored dot and a title-bar bell. Opt-in installers add the agent skill, Claude Code / Codex status hooks, shell integration and the CLI on `PATH`.
+- **Agent status and skill.** Agents report their state through hooks or the API as a colored dot and a title-bar bell. Opt-in installers add the agent skill, Claude Code / Codex / Devin status hooks, shell integration and the CLI on `PATH`.
 - **Claude Code binding and auto-resume.** A `claude` wrapper ties each conversation to its pane, so a restart re-launches every bound pane and the conversation comes back. Updating Claude Code restarts every running Claude session into its own conversation.
 - **Restore, and shells that survive the UI.** Sessions come back with their layout and pinned commands, and with captured commands when `restore-commands` is on. The experimental pty-host server mode keeps every shell running through a UI quit, update or crash.
 - **A real Windows terminal.** Default Terminal Application registration, ~33k lines/s output, Sixel and Kitty graphics, the Kitty keyboard protocol, ligatures, elevated and de-elevated sessions side by side, and agterm's menus — File, View, Navigate, Help — as a menu bar in the title bar (Alt or F10).
@@ -105,6 +105,7 @@ The same interface covers windows, splits, overlays, dashboards, HUDs, notificat
 - [Launching a session command](docs/session-commands.md): `session new --command`, direct mode, `--wait`.
 - [Workspace navigation](docs/navigation.md), [quick terminal](docs/quick-terminal.md), [session HUD](docs/session-hud.md), [native picker](docs/native-picker.md).
 - [Default terminal](docs/defterm-testing.md): how the console handoff is exercised.
+- [Local UI tests](docs/sandbox-ui-tests.md): run the same suites directly on the Windows desktop or in optional Windows Sandbox.
 - [agterm parity](docs/agterm-parity.md) and [agliteterm parity](docs/lite-parity.md): where both products stand.
 - [CONTRIBUTING.md](CONTRIBUTING.md): building from source, dev builds side by side with the release, the contract with agliteterm.
 
@@ -142,7 +143,7 @@ Coming from `agwinterm-lite`? Nothing to do: 0.17.4's updater points at the agli
 agwinterm exists because of **[umputun](https://github.com/umputun)** and **[agterm](https://github.com/umputun/agterm)**. agterm's design — a terminal that treats AI coding agents as first-class citizens, with per-session status, workspace navigation, a detached quick terminal, a native picker, and a language-agnostic control socket — is the blueprint this project follows. agwinterm is a tribute and a port of the ideas and UX, not of the code. Thank you, umputun. 💜
 
 - **[Ghostty](https://ghostty.org)** and **[iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)**: the bundled color themes are the community ghostty/iTerm2 set.
-- **[Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows)** (Direct2D/DirectWrite), **[Porta.Pty](https://www.nuget.org/packages/Porta.Pty)** (ConPTY), and **[microsoft/terminal](https://github.com/microsoft/terminal)**'s OpenConsole for the default-terminal handoff.
+- **[Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows)** (Direct2D/DirectWrite), **[Porta.Pty](https://www.nuget.org/packages/Porta.Pty)** (ConPTY), and **[microsoft/terminal](https://github.com/microsoft/terminal)**'s OpenConsole for the default-terminal handoff and, from [Microsoft.Windows.Console.ConPTY](https://www.nuget.org/packages/Microsoft.Windows.Console.ConPTY) (MIT), as the ConPTY that sessions run on.
 - Bundled fonts, with versions and licenses, are listed in [THIRD_PARTY_FONTS.md](THIRD_PARTY_FONTS.md).
 
 ## License

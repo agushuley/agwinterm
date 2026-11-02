@@ -120,6 +120,10 @@ internal static class Win32
     public const uint TPM_RETURNCMD = 0x0100, TPM_RIGHTBUTTON = 0x0002, TPM_LEFTALIGN = 0x0000, TPM_BOTTOMALIGN = 0x0020;
     public const uint MF_STRING = 0x0000, MF_POPUP = 0x0010, MF_SEPARATOR = 0x0800, MF_GRAYED = 0x0001;
     public const uint BIF_RETURNONLYFSDIRS = 0x0001, BIF_NEWDIALOGSTYLE = 0x0040;
+    public const uint BFFM_INITIALIZED = 1;
+    public const uint BFFM_SETSELECTIONW = 0x0400 + 103; // WM_USER + 103
+
+    public delegate int BrowseFolderCallback(IntPtr hwnd, uint uMsg, IntPtr lParam, IntPtr lpData);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct BROWSEINFO
@@ -402,8 +406,10 @@ internal static class Win32
     [DllImport("user32.dll")]
     public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
 
+    /// <summary>A metric at the given DPI. Plain GetSystemMetrics answers at the SYSTEM DPI (the primary
+    /// monitor's at login) under PER_MONITOR_AWARE_V2, which is wrong for a window on any other monitor.</summary>
     [DllImport("user32.dll")]
-    public static extern int GetSystemMetrics(int nIndex);
+    public static extern int GetSystemMetricsForDpi(int nIndex, uint dpi);
 
     [DllImport("user32.dll")]
     public static extern bool IsZoomed(IntPtr hWnd);

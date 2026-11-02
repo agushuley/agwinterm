@@ -144,7 +144,7 @@ internal partial class Program
         }
     }
 
-    /// <summary>Draw one session row (shared by tree + flagged modes): highlight, flag marker, name, unread badge, status dot.</summary>
+    /// <summary>Draw one session row (shared by tree + flagged modes): highlight, flag marker, name, unread badge, status indicators.</summary>
     private void DrawSessionRow(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, Ses s, float y, float rowH)
     {
         bool active = ReferenceEquals(_active, s);
@@ -184,11 +184,18 @@ internal partial class Program
             rt.DrawText("⚡", _uiSmall, new Rect(23f, y, 16f, rowH), brush);
             nameX = 40f;
         }
+        int? exitCode = s.Panes.Count == 1 ? s.ActivePane.ProfileExitCode : null;
+        int unread = UnreadOf(s);
+        string? badgeText = unread > 0 && _config.NotificationBadges ? (unread > 99 ? "99+" : unread.ToString()) : null;
+        float badgeWidth = badgeText is null ? 0f : MeasureText(badgeText, _uiSmall) + 10f;
+        float badgeX = _sidebarW - 30f - badgeWidth;
         bool isDrag = _dragging && ReferenceEquals(s, _dragItem);
         brush.Color = isDrag ? new Color4(0.5f, 0.53f, 0.57f, 0.45f) : (active ? SbActiveText : SbDimText);
         if (!ReferenceEquals(_editing, s)) // the rename box covers the name while editing
         {
-            float nameAvail = _sidebarW - nameX - 22f;
+            float nameRight = _sidebarW - 22f;
+            if (badgeText is not null) nameRight = MathF.Min(nameRight, badgeX - 5f);
+            float nameAvail = MathF.Max(0f, nameRight - nameX);
             // Clip + ellipsis-trim so a long name (or an enlarged sidebar font) never spills over the dot.
             rt.DrawText(s.Name, _sidebarFont, new Rect(nameX, y, nameAvail, rowH), brush, DrawTextOptions.Clip);
             RecordSidebarName(s, s.Name, nameX, y, nameAvail, rowH);
@@ -209,11 +216,8 @@ internal partial class Program
             }
         }
         // Unread-notification count badge, just left of the status circle (can be hidden; the count still tracks).
-        int unread = UnreadOf(s);
-        if (unread > 0 && _config.NotificationBadges)
+        if (badgeText is not null)
         {
-            string bn = unread > 99 ? "99+" : unread.ToString();
-            float bw = MeasureText(bn, _uiSmall) + 10f, bx = _sidebarW - 30f - bw;
             var notificationCategory = UnreadCategoryOf(s);
             brush.Color = notificationCategory switch
             {
@@ -222,14 +226,15 @@ internal partial class Program
                 _ => HexColor4(_config.NotificationColorAttention, new(230 / 255f, 77 / 255f, 61 / 255f, 1f)),
             };
             var badgeColor = brush.Color;
-            rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(bx, y + rowH / 2f - 8f, bw, 16f), RadiusX = 8f, RadiusY = 8f }, brush);
+            rt.FillRoundedRectangle(new RoundedRectangle { Rect = new Rect(badgeX, y + rowH / 2f - 8f, badgeWidth, 16f), RadiusX = 8f, RadiusY = 8f }, brush);
             brush.Color = Lum(badgeColor) >= 0.55f
                 ? new Color4(0.12f, 0.10f, 0.07f, 1f)
                 : new Color4(1f, 1f, 1f, 1f);
-            rt.DrawText(bn, _uiSmall, new Rect(bx + 5f, y + rowH / 2f - 8f, bw - 8f, 16f), brush);
+            rt.DrawText(badgeText, _uiSmall, new Rect(badgeX + 5f, y + rowH / 2f - 8f, badgeWidth - 8f, 16f), brush);
+            if (exitCode is int code)
+                _sidebarNames.Add(new SidebarNameHit(s, $"{unread} unread; session ended (exit {code})", badgeX, y, badgeWidth, rowH));
         }
-        // Status circle right-aligned in the row (agterm layout); pulse it if blink was requested.
-        // Pane-aware: the dot shows the most attention-worthy status across ALL the session's panes.
+        // Pane-aware: the status circle shows the most attention-worthy state across ALL panes.
         var dot = StatusDot(AggStatus(s));
         if (AggBlink(s) && !_cursorOn) dot = new Color4(dot.R, dot.G, dot.B, 0.22f);
         brush.Color = dot;
@@ -484,6 +489,25 @@ internal partial class Program
             else A("New Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true));
             if (IsElevated()) A("New Non-Elevated Session", "", () => CreateSession(Guid.NewGuid().ToString(), null, null, cws, true, deElevate: true));
             A("Open Directory…", "", () => { var d = PickFolder(); if (d is not null) CreateSession(Guid.NewGuid().ToString(), null, d, cws, true); });
+            A("Set Default Directory…", "", () =>
+            {
+                var d = PickFolder(cws.DefaultDir);
+                if (d is null) return;
+                if (!TrySetWorkspaceDefaultDir(cws, d, out _))
+                {
+                    ShowToast(WorkspaceDefaultDirs.NotDirectory);
+                    return;
+                }
+                SaveState();
+                ShowToast("Default directory: " + cws.DefaultDir);
+            });
+            if (!string.IsNullOrEmpty(cws.DefaultDir))
+                A("Clear Default Directory", "", () =>
+                {
+                    TrySetWorkspaceDefaultDir(cws, null, out _);
+                    SaveState();
+                    ShowToast("Default directory cleared");
+                });
             A("Rename", "", () => StartRename(cws));
             A(wsFocused ? "Unfocus" : "Focus", "", () => WorkspaceFocusOp(wsFocused ? "off" : "on", cws.Id));
             if (wsCount > 1) { list.Add(MenuSeparator()); A("Delete Workspace", "", () => DeleteWorkspace(cws)); }
@@ -646,21 +670,50 @@ internal partial class Program
         return true;
     }
 
-    /// <summary>Modal folder picker (native shell). Returns the chosen path or null.</summary>
-    private string? PickFolder()
+    private static readonly BrowseFolderCallback s_browseFolderCallback = BrowseFolderCallbackImpl;
+
+    private static int BrowseFolderCallbackImpl(IntPtr hwnd, uint uMsg, IntPtr lParam, IntPtr lpData)
     {
-        var bi = new BROWSEINFO
+        if (uMsg == BFFM_INITIALIZED && lpData != IntPtr.Zero)
+            SendMessageW(hwnd, BFFM_SETSELECTIONW, (IntPtr)1, lpData);
+        return 0;
+    }
+
+    /// <summary>Modal folder picker (native shell). Returns the chosen path or null.
+    /// <paramref name="initialDir"/> opens the dialog on that folder when it still exists.</summary>
+    private string? PickFolder(string? initialDir = null)
+    {
+        IntPtr initialPtr = IntPtr.Zero;
+        try
         {
-            hwndOwner = _hwnd,
-            lpszTitle = "Open Directory",
-            ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE,
-        };
-        IntPtr pidl = SHBrowseForFolderW(ref bi);
-        if (pidl == IntPtr.Zero) return null;
-        var sb = new StringBuilder(260);
-        bool ok = SHGetPathFromIDListW(pidl, sb);
-        CoTaskMemFree(pidl);
-        return ok && sb.Length > 0 ? sb.ToString() : null;
+            if (!string.IsNullOrWhiteSpace(initialDir))
+            {
+                try
+                {
+                    string full = Path.GetFullPath(initialDir);
+                    if (Directory.Exists(full)) initialPtr = Marshal.StringToHGlobalUni(full);
+                }
+                catch { }
+            }
+            var bi = new BROWSEINFO
+            {
+                hwndOwner = _hwnd,
+                lpszTitle = "Open Directory",
+                ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE,
+                lpfn = initialPtr != IntPtr.Zero ? Marshal.GetFunctionPointerForDelegate(s_browseFolderCallback) : IntPtr.Zero,
+                lParam = initialPtr,
+            };
+            IntPtr pidl = SHBrowseForFolderW(ref bi);
+            if (pidl == IntPtr.Zero) return null;
+            var sb = new StringBuilder(260);
+            bool ok = SHGetPathFromIDListW(pidl, sb);
+            CoTaskMemFree(pidl);
+            return ok && sb.Length > 0 ? sb.ToString() : null;
+        }
+        finally
+        {
+            if (initialPtr != IntPtr.Zero) Marshal.FreeHGlobal(initialPtr);
+        }
     }
 
     // ---- Agent attention (title-bar bell + jump-to-next) ----
@@ -1355,11 +1408,15 @@ internal partial class Program
     private void AdjustClientRect(IntPtr hwnd, IntPtr lParam)
     {
         // When maximized, inset by the frame so content isn't pushed off-screen / under the taskbar.
+        // Windows hangs a maximized window past the monitor by the frame at the WINDOW's DPI; measured
+        // at any other DPI the inset misses it, and a strip of DWM caption shows along the top.
         if (IsZoomed(hwnd))
         {
             var rc = Marshal.PtrToStructure<RECT>(lParam);
-            int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            uint dpi = GetDpiForWindow(hwnd);
+            int pad = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            int fx = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + pad;
+            int fy = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + pad;
             rc.left += fx; rc.right -= fx; rc.top += fy; rc.bottom -= fy;
             Marshal.StructureToPtr(rc, lParam, false);
         }

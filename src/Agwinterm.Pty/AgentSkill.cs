@@ -52,10 +52,10 @@ public static class AgentSkill
         `agwintermctl session status blocked --sound --blink`.
         (A default blocked cue can also be set once via `blocked-sound =` in the config.)
 
-        Better: run `agwintermctl install hooks` once. It wires Claude Code hooks so your status updates
-        automatically (active while working, blocked on permission prompts, completed on stop); merges the
-        same status hooks into Codex's ~/.codex/hooks.json (trust them once in Codex with /hooks); adds a
-        SessionStart hook to both so the pane resumes your exact session after a restart or reboot, in any shell;
+        Better: run `agwintermctl install hooks` once. It wires Claude Code, Codex and Devin hooks so your
+        status updates automatically (active while working, blocked on permission prompts, completed on stop);
+        trust the Codex hooks once with /hooks. It also adds a SessionStart hook to Claude, Codex and Devin so the pane
+        resumes your exact session after a restart or reboot, in any shell;
         and installs a generic PowerShell-profile bridge that marks any command matching `$env:AGWINTERM_AGENT_RE`
         active/completed.
 
@@ -74,7 +74,7 @@ public static class AgentSkill
         - `agwintermctl session new [--name N] [--cwd DIR] [--workspace ID|--workspace-name NAME [--create-workspace]] [--command "PowerShell code"] [--command-mode powershell|direct] [--profile NAME] [--no-select] [--wait]`
           `--no-select` creates the session in the background without stealing focus or changing the current selection.
           `--command` runs PowerShell code and leaves an interactive prompt. `--wait` is accepted in this mode; the prompt stays open either way.
-          — create a session (prints its id). `--command-mode direct` launches executable + arguments using Windows quoting, with no added shell; it refuses `--wait`. An exited standalone pane remains visible without an interactive prompt.
+          — create a session (prints its id). `--command-mode direct` launches executable + arguments using Windows quoting, with no added shell; it refuses `--wait`. An exited standalone pane remains visible without an interactive prompt. Profile/login-shell tabs show an in-terminal exit hold and close when you press Enter.
           `--profile NAME` picks a shell profile (default = Windows PowerShell). `--command` and `--profile` are mutually exclusive.
           `--workspace` is a workspace id (or unique id prefix; `tree --json` lists them), `--workspace-name` its sidebar label
           (case-insensitive). **An unknown workspace is refused** (`ok:false`, no session created) — it is never swapped for the
@@ -133,7 +133,7 @@ public static class AgentSkill
         - `agwintermctl session go next|prev|first|last|next-attention|prev-attention` — move the active session
         - `agwintermctl session move --to up|down|top|bottom`     — reorder within its workspace
         - `agwintermctl session move <workspace-id>`             — relocate to another workspace
-        - `agwintermctl workspace new [name]` / `workspace rename <name> [--target WS]` / `workspace select [--target WS]` / `workspace move --to <dir> [--target WS]` / `workspace delete [--target WS]`
+        - `agwintermctl workspace new [name] [--default-dir DIR]` / `workspace default-dir set <path>|clear [--target WS]` / `workspace rename <name> [--target WS]` / `workspace select [--target WS]` / `workspace move --to <dir> [--target WS]` / `workspace delete [--target WS]`
         - `agwintermctl workspace go next|prev [--window ID]` (also `--to`, alias `previous`) wraps visible workspaces, including collapsed ones; refuses flagged mode, no other destination, quick windows and explicit `--target`.
           An empty destination becomes current without closing the selected terminal. New-session explicit workspace/caller placement still wins over this fallback.
           Tree `foregroundShells` (pane-order, null unknown) and primary/split aliases are conservative Windows shell hints, never idle-prompt or input-safety proof.

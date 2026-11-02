@@ -79,7 +79,8 @@ internal partial class Program
         // re-syncs the mirrors, and an ADOPTED session's reader thread is already feeding by now.
         lock (session.SyncRoot) session.Emulator.ScrollbackMax = _config.Scrollback;
         var pane = new Pane { Id = paneId, S = session, StartCwd = cwd, FontSize = fontSize,
-            FontZoomed = fontSize != (float)_config.FontSize };
+            FontZoomed = fontSize != (float)_config.FontSize,
+            ProfileShell = sessionCommand is null && handoff is null && string.IsNullOrWhiteSpace(command) };
         // New output snaps this pane back to the live bottom when the buffer ACTUALLY scrolled (a line
         // pushed into history) — not on every repaint. TUIs like Claude Code redraw in place without
         // scrolling, so a mouse selection survives those frames. #copy-selection
@@ -116,7 +117,12 @@ internal partial class Program
         // An explicit --sound on session.status: play its spec (null => default alert).
         session.SoundRequested += PlayStatusSound;
         session.Emulator.Host = new PaneHost(this, pane, session);   // the host-action seam (see IHostActions)
-        session.Exited += _ => Post(() => OnPaneProcessExited(pane));   // split survivor promotion (agterm #121)
+        session.Exited += code => Post(() =>
+        {
+            OnPaneProcessExited(pane);   // split survivor promotion (agterm #121)
+            NotifyProfileShellExit(pane, code);
+            TryEnterExitHold(pane);
+        });
         var env = new Dictionary<string, string>
         {
             ["AGWINTERM"] = "1",
@@ -130,6 +136,11 @@ internal partial class Program
             // scripts) can detect that they're running inside agwinterm. (agterm #203.)
             ["TERM_PROGRAM"] = "agwinterm",
             ["TERM_PROGRAM_VERSION"] = _termProgramVersion,
+            // 24-bit color. Without it (and without TERM, which Windows shells leave unset) apps that
+            // size their palette from the environment, Codex among them, fall back to 16 colors (#339).
+            ["COLORTERM"] = "truecolor",
+            // The theme a pty-host answers OSC 10/11 with while no UI is attached (#339).
+            [ThemeColors.EnvVar] = ThemeColors.Format(_theme.DefaultForeground, _theme.DefaultBackground),
         };
         if (extraEnv is not null) foreach (var kv in extraEnv) env[kv.Key] = kv.Value; // custom-command $AGW_* context
         if (handoff is { } h)
@@ -278,6 +289,7 @@ internal partial class Program
             // Refusing its reply must not abort the output pump and lose the remaining output.
             SessionInput.TryWrite(_s, Encoding.UTF8.GetBytes(reply));
         }
+        public (Color Foreground, Color Background)? DefaultColors => (_theme.DefaultForeground, _theme.DefaultBackground);
         public void Bell() => _app.Post(() => _app.RingBell(_pane));                                     // BEL -> beep/flash per config
         public void Unhandled(string kind, string detail) => VtLog.Write(_pane.Id, kind, detail);       // AGWINTERM_VT_LOG tap
     }
@@ -397,6 +409,39 @@ internal partial class Program
         catch (Exception ex) { ShowToast("elevated launch failed: " + ex.Message); }
     }
 
+    /// <summary>Resolve spawn cwd: explicit, then workspace default when the path exists, then global new-session-dir mode.</summary>
+    private string? ResolveNewSessionCwd(Workspace ws, string? explicitCwd)
+    {
+        if (!string.IsNullOrEmpty(explicitCwd)) return explicitCwd;
+        if (!string.IsNullOrWhiteSpace(ws.DefaultDir) && Directory.Exists(ws.DefaultDir)) return ws.DefaultDir;
+        string? want = _config.NewSessionDirMode switch
+        {
+            "current" => _active is not null ? CurrentDirOf(_active) : null,
+            "custom" => _config.NewSessionDir,
+            _ /*home*/ => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        };
+        if (!string.IsNullOrWhiteSpace(want) && Directory.Exists(want)) return want;
+        return null;
+    }
+
+    /// <summary>Set or clear <see cref="Workspace.DefaultDir"/>. <paramref name="path"/> null/empty clears; otherwise path must exist (normalized full path).</summary>
+    private bool TrySetWorkspaceDefaultDir(Workspace ws, string? path, out string? refuse)
+    {
+        refuse = null;
+        if (string.IsNullOrEmpty(path))
+        {
+            ws.DefaultDir = null;
+            return true;
+        }
+        if (WorkspaceDefaultDirs.ValidateSet(path) is { } err)
+        {
+            refuse = err;
+            return false;
+        }
+        ws.DefaultDir = WorkspaceDefaultDirs.NormalizeSet(path);
+        return true;
+    }
+
     /// <summary>Create a session with its first pane. <paramref name="paneId"/> is pane 0's id; null = the
     /// session id, which is what every caller but restore passes (a <c>session new</c> mints pane 0 =
     /// session id). Restore passes the SAVED pane-0 id, because after a <c>session swap</c> the pane that
@@ -416,17 +461,7 @@ internal partial class Program
             return _active ?? ws.Sessions.FirstOrDefault() ?? CreateSession(id, name, cwd, ws, makeActive, fontSize, command, interactive, extraEnv, null);
         }
         float fs = fontSize is > 0 ? fontSize.Value : (float)_config.FontSize;
-        // No explicit cwd → resolve by the new-session-directory mode (home | current | custom).
-        if (string.IsNullOrEmpty(cwd))
-        {
-            string? want = _config.NewSessionDirMode switch
-            {
-                "current" => _active is not null ? CurrentDirOf(_active) : null,
-                "custom" => _config.NewSessionDir,
-                _ /*home*/ => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            };
-            if (!string.IsNullOrWhiteSpace(want) && Directory.Exists(want)) cwd = want;
-        }
+        cwd = ResolveNewSessionCwd(ws, cwd);
         int ordinal;
         lock (_workspaces) ordinal = ws.Sessions.Count + 1;
         if (name is null && handoff is { Title.Length: > 0 } ht) name = ht.Title;   // label handoff sessions with the app's title
@@ -1403,8 +1438,8 @@ internal partial class Program
         if (!OwnsSession(ses)) return;
         if (ses.Panes.Count >= 2) return;   // agterm model: strictly primary + one split (no 3+ panes)
         var cur = ses.ActivePane;
-        string? cwd = string.IsNullOrEmpty(cur.StartCwd) ? null : cur.StartCwd;
-        var np = CreatePane(Guid.NewGuid().ToString(), ses.Ws, cwd, cur.FontSize, profileName: ses.ProfileName);
+        string cwd = PaneCwd(cur);
+        var np = CreatePane(Guid.NewGuid().ToString(), ses.Ws, cwd.Length > 0 ? cwd : null, cur.FontSize, profileName: ses.ProfileName);
         np.FontZoomed = cur.FontZoomed;
         float half = cur.Ratio / 2f;
         cur.Ratio = half; np.Ratio = half;
@@ -1502,6 +1537,44 @@ internal partial class Program
         ClosePane(ses, p);
     }
 
+    /// <summary>Report the exit of a lone profile/login shell without changing its visible buffer.</summary>
+    private void NotifyProfileShellExit(Pane pane, int exitCode)
+    {
+        if (!pane.ProfileShell || pane.ProfileExitCode is not null || !pane.S.HasExited) return;
+        Ses? ses;
+        lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(pane));
+        if (ses is null || ses.Panes.Count != 1) return;
+        pane.ProfileExitCode = exitCode;
+        RequestRedraw();
+        EmitEvent("tree");
+        if (!ReferenceEquals(pane, ActiveSurface()) || !_windowActive)
+            OnNotified(pane, "Session ended", $"{ses.Name} exited with code {exitCode}.",
+                exitCode == 0 ? NotificationCategory.Ok : NotificationCategory.Attention);
+    }
+
+    /// <summary>Leave a visible exit prompt in a lone profile shell's scrollback.</summary>
+    private void TryEnterExitHold(Pane pane)
+    {
+        if (pane.ProfileExitCode is not int exitCode || pane.AwaitingExitAck) return;
+        Ses? ses;
+        lock (_workspaces) ses = _workspaces.SelectMany(w => w.Sessions).FirstOrDefault(s => s.Panes.Contains(pane));
+        if (ses is null || ses.Panes.Count != 1) return;
+        pane.AwaitingExitAck = true;
+        string msg = Environment.NewLine + Environment.NewLine + "The session has ended (exit " + exitCode + ")." + Environment.NewLine + "Press Enter to close the session." + Environment.NewLine;
+        lock (pane.S.SyncRoot) pane.S.Emulator.Feed(System.Text.Encoding.UTF8.GetBytes(msg));
+        RequestRedraw();
+    }
+
+    /// <summary>Enter on an exit-hold pane closes the tab without <see cref="ConfirmCloseOk"/>.</summary>
+    private bool TryCloseExitHoldOnEnter()
+    {
+        if (_active is not { } ses || ses.Panes.Count != 1) return false;
+        if (!ses.ActivePane.AwaitingExitAck) return false;
+        ses.ActivePane.AwaitingExitAck = false;
+        CloseSessionInternal(ses);
+        return true;
+    }
+
     /// <summary>A recently-closed session's restorable identity (IDE "reopen closed" / browser Ctrl+Shift+T).
     /// SessionId is the original id, reused on reopen so control-API/agent references stay stable.
     /// Context is the session.context text (P3) — it rides here so `session reopen` brings it back.</summary>
@@ -1510,7 +1583,7 @@ internal partial class Program
         string SessionId = "", long Seq = 0, string? Context = null);
     /// <summary>A recently-closed workspace (its name + all its sessions), so it can be reopened whole.
     /// WorkspaceId is the original id, reused on reopen to keep it stable across close→reopen.</summary>
-    private sealed record ClosedWorkspace(string Name, IReadOnlyList<ClosedSession> Sessions, long Seq, string WorkspaceId = "");
+    private sealed record ClosedWorkspace(string Name, IReadOnlyList<ClosedSession> Sessions, long Seq, string WorkspaceId = "", string? DefaultDir = null);
     private readonly List<ClosedSession> _closedSessions = new();
     private readonly List<ClosedWorkspace> _closedWorkspaces = new();
     private const int MaxClosedSessions = 25;
@@ -1542,7 +1615,7 @@ internal partial class Program
         {
             if (sessions.Count == 0) return;
             var items = sessions.Select(CaptureClosedSessionData).ToList();
-            _closedWorkspaces.Add(new ClosedWorkspace(ws.Name, items, ++_closeSeq, ws.Id));
+            _closedWorkspaces.Add(new ClosedWorkspace(ws.Name, items, ++_closeSeq, ws.Id, ws.DefaultDir));
             if (_closedWorkspaces.Count > MaxClosedSessions) _closedWorkspaces.RemoveAt(0);
         }
         catch { }
@@ -1615,6 +1688,7 @@ internal partial class Program
     {
         _closedWorkspaces.Remove(c);
         var ws = CreateWorkspace(StableWorkspaceId(c.WorkspaceId), c.Name);
+        ws.DefaultDir = c.DefaultDir;
         Ses? first = null;
         foreach (var cs in c.Sessions)
         {
