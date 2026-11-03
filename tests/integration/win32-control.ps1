@@ -1206,7 +1206,7 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
                         $ceNode = Get-SessionSnapshot $ceId
                         if (-not $ceNode) { continue }
                         $ceText = [string](Invoke-Ctl @('session', 'text', '--target', $ceId)).result
-                        if ($ceText.Contains('Press Enter to close the session.')) { $ceHeld = $true; break }
+                        if ($ceText.Contains('Press Enter to close the session.') -and [int]$ceNode.notifications -eq 1) { $ceHeld = $true; break }
                     }
                     Check ($commandExitCase.Name + ' command exit keeps its code, hold prompt and one background notification') `
                         ($ceHeld -and $ceText.Contains(('session has ended (exit ' + $commandExitCase.Code + ')')) -and [int]$ceNode.notifications -eq 1) "text=$ceText"
