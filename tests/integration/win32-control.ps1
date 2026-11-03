@@ -1145,7 +1145,7 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
         }
         Check 'session paste <text> --target <a session whose process exited> is refused "the pane''s process has exited" (the session is still listed)' ($p6ExitMade.ok -and $p6ExitPaste -and (-not $p6ExitPaste.ok) -and ([string]$p6ExitPaste.error) -eq "the pane's process has exited" -and (Get-SessionSnapshot $p6Exited)) "new=$($p6ExitMade | ConvertTo-Json -Compress) paste=$($p6ExitPaste | ConvertTo-Json -Compress)"
         if ($p6Exited) { try { Invoke-Ctl @('session', 'close', $p6Exited) | Out-Null } catch { } }
-        # A profile shell exiting in the background raises one unread notification without a hold prompt.
+        # A profile shell exiting in the background raises one unread notification and a hold prompt.
         $exitMade = Invoke-Ctl @('session', 'new', '--name', 'exit-notification', '--no-select')
         $exitId = if ($exitMade.ok) { [string]$exitMade.result } else { $null }
         $exitNode = $null
@@ -1189,6 +1189,43 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
         }
         Check 'profile shell exit feeds an in-terminal hold prompt with the exit code' ($ehMade.ok -and $ehHoldSeen -and $ehText -match 'session has ended \(exit 42\)') "new=$($ehMade | ConvertTo-Json -Compress) text-tail=$($ehText.Substring([Math]::Max(0, $ehText.Length - 120)))"
         Check 'Enter on exit hold closes the session tab (tree no longer lists it)' ($ehHoldSeen -and $ehGone) "id=$ehId"
+        # Programmatically launched commands share the same exit notification and acknowledgement.
+        # Keep them in the background until after exit, including an immediately exiting direct child.
+        foreach ($commandExitCase in @(
+            @{ Name = 'powershell'; Args = @('--command', 'exit 23'); Code = 23 },
+            @{ Name = 'direct'; Args = @('--command', 'cmd.exe /d /c exit 7', '--command-mode', 'direct'); Code = 7 }
+        )) {
+            $ceId = $null
+            try {
+                $ceMade = Invoke-Ctl (@('session', 'new', '--name', ('command-exit-' + $commandExitCase.Name), '--no-select') + $commandExitCase.Args)
+                $ceId = if ($ceMade.ok) { [string]$ceMade.result } else { $null }
+                $ceText = ''; $ceNode = $null; $ceHeld = $false; $ceGone = $false
+                if ($ceId) {
+                    for ($i = 0; $i -lt 40; $i++) {
+                        Start-Sleep -Milliseconds 250
+                        $ceNode = Get-SessionSnapshot $ceId
+                        if (-not $ceNode) { continue }
+                        $ceText = [string](Invoke-Ctl @('session', 'text', '--target', $ceId)).result
+                        if ($ceText.Contains('Press Enter to close the session.')) { $ceHeld = $true; break }
+                    }
+                    Check ($commandExitCase.Name + ' command exit keeps its code, hold prompt and one background notification') `
+                        ($ceHeld -and $ceText.Contains(('session has ended (exit ' + $commandExitCase.Code + ')')) -and [int]$ceNode.notifications -eq 1) "text=$ceText"
+                    Invoke-Ctl @('session', 'select', '--target', $ceId) | Out-Null
+                    # Wait for the posted selection before delivering Enter to the owned window.
+                    for ($i = 0; $i -lt 30; $i++) {
+                        if ((Get-SessionSnapshot $ceId).active) { break }
+                        Start-Sleep -Milliseconds 100
+                    }
+                    [Agwinterm.Win32ControlTest.NativeMethods]::PostReturn($process.MainWindowHandle)
+                    for ($i = 0; $i -lt 20; $i++) {
+                        if (-not (Get-SessionSnapshot $ceId)) { $ceGone = $true; break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                }
+                Check ($commandExitCase.Name + ' command session closes on Enter') ($ceMade.ok -and $ceHeld -and $ceGone) "id=$ceId"
+            }
+            finally { if ($ceId -and (Get-SessionSnapshot $ceId)) { Invoke-Ctl @('session', 'close', $ceId) | Out-Null } }
+        }
         # The other slot is empty: copy / text / result name the slot; result on the held slot is "still running".
         $p5CopyLeft = Invoke-Ctl @('session', 'overlay', 'copy', '--pane', 'left', '--target', $p5Id)
         $p5TextLeft = Invoke-Ctl @('session', 'overlay', 'text', '--pane', 'left', '--target', $p5Id)
