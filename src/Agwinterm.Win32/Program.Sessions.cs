@@ -1598,6 +1598,8 @@ internal partial class Program
     }
 
     /// <summary>Enter on an exit-hold pane closes the tab without <see cref="ConfirmCloseOk"/>.</summary>
+    private bool _exitHoldAteChar;
+
     private bool TryCloseExitHoldOnEnter()
     {
         if (_active is not { } ses || ses.Panes.Count != 1) return false;

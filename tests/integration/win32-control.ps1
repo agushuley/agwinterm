@@ -1226,6 +1226,31 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
             }
             finally { if ($ceId -and (Get-SessionSnapshot $ceId)) { Invoke-Ctl @('session', 'close', $ceId) | Out-Null } }
         }
+        # One physical Enter produces both WM_KEYDOWN and WM_CHAR; only the selected tab should close.
+        $heldIds = @()
+        try {
+            foreach ($code in @(0, 1)) {
+                $created = Invoke-Ctl @('session', 'new', '--name', "exit-pair-$code", '--no-select', '--command-mode', 'direct', '--command', "cmd.exe /d /c exit $code")
+                if ($created.ok) { $heldIds += [string]$created.result }
+            }
+            $bothHeld = $false
+            for ($i = 0; $i -lt 40 -and $heldIds.Count -eq 2; $i++) {
+                $bothHeld = @($heldIds | Where-Object { ([string](Invoke-Ctl @('session', 'text', '--target', $_)).result).Contains('Press Enter to close the session.') }).Count -eq 2
+                if ($bothHeld) { break }
+                Start-Sleep -Milliseconds 250
+            }
+            if ($bothHeld) {
+                Invoke-Ctl @('session', 'select', '--target', $heldIds[1]) | Out-Null
+                for ($i = 0; $i -lt 30; $i++) {
+                    if ((Get-SessionSnapshot $heldIds[1]).active) { break }
+                    Start-Sleep -Milliseconds 100
+                }
+                [Agwinterm.Win32ControlTest.NativeMethods]::PostReturn($process.MainWindowHandle)
+                Start-Sleep -Milliseconds 500
+            }
+            Check 'one Enter closes only the selected exited session' ($bothHeld -and -not (Get-SessionSnapshot $heldIds[1]) -and $null -ne (Get-SessionSnapshot $heldIds[0])) "ids=$($heldIds -join ',')"
+        }
+        finally { foreach ($id in $heldIds) { if (Get-SessionSnapshot $id) { Invoke-Ctl @('session', 'close', $id) | Out-Null } } }
         # The other slot is empty: copy / text / result name the slot; result on the held slot is "still running".
         $p5CopyLeft = Invoke-Ctl @('session', 'overlay', 'copy', '--pane', 'left', '--target', $p5Id)
         $p5TextLeft = Invoke-Ctl @('session', 'overlay', 'text', '--pane', 'left', '--target', $p5Id)
