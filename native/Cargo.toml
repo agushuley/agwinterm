@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["agwinterm-core", "agwinterm-ptyhost"]
+members = ["agwinterm-core", "agwinterm-ptyhost", "agwinterm-hook"]
 
 [profile.release]
 lto = true

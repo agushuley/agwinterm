@@ -68,11 +68,40 @@ public static class ShellProfiles
     /// <summary>The profiles.json path (for opening in an editor).</summary>
     public static string PathFor(string appDir) => Path.Combine(appDir, "profiles.json");
 
+    /// <summary>Explicit reload also discovers distributions installed since the initial seed.</summary>
+    public static Config Reload(string appDir)
+    {
+        var config = Load(appDir);
+        string wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "wsl.exe");
+        if (File.Exists(wsl))
+            foreach (string distro in WslDistros(wsl))
+            {
+                string name = "WSL: " + distro;
+                if (config.Profiles.Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) continue;
+                config.Profiles.Add(new ShellProfile { Name = name, Command = wsl, Args = ["-d", distro], Icon = Term });
+            }
+        Save(appDir, config);
+        return config;
+    }
+
     /// <summary>Persist the config (default + profiles) to profiles.json (best-effort).</summary>
     public static void Save(string appDir, Config c)
     {
         try { Directory.CreateDirectory(appDir); File.WriteAllText(PathFor(appDir), JsonSerializer.Serialize(c, JsonOpts)); }
         catch { /* best-effort */ }
+    }
+
+    public static void SaveChecked(string appDir, Config config)
+    {
+        string path = PathFor(appDir);
+        Directory.CreateDirectory(appDir);
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(config, JsonOpts));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     /// <summary>Set the default profile by name and persist; returns the reloaded/normalized config.</summary>

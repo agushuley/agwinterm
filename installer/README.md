@@ -19,15 +19,20 @@ and `agwinterm-ptyhost.exe` load it from their own directory, and fall back to t
 ## Build
 
 ```powershell
-installer\build.ps1        # both setups (what CI/releases run)
-installer\build-lite.ps1   # lite setup only — skips the .NET publish, handy when iterating on lite
+installer\build-portable-docker.ps1  # portable single-file exe via Docker (no host SDK); see ../../docs/local-build.md
+installer\build-portable.ps1         # same portable exe when a .NET 10 SDK is available on the host
+installer\build.ps1                  # both setups (what CI/releases run)
+installer\build-lite.ps1             # lite setup only — skips the .NET publish, handy when iterating on lite
 ```
 
 Prereqs:
 - .NET SDK with the `net10.0-windows` target (the repo pins .NET 10).
 - Rust + MSVC C++ build tools (for the Rust core/host and the lite client).
+- The static Linux hooks at `artifacts/wsl-hook/agwinterm-hook-linux-x64` and `agwinterm-hook-linux-arm64`. PR and release CI build and test them on native Linux runners. Local builds can run `tools/build-wsl-hook.ps1` using Rust in WSL with the `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` targets installed; packaging builds missing artifacts automatically. The installer ships both Linux binaries and `agwinterm-hook.exe`.
 - [Inno Setup 6](https://jrsoftware.org/isinfo.php) — `ISCC.exe` on PATH, the default install location,
   or the per-user winget location (`winget install JRSoftware.InnoSetup`).
+
+`build-portable.ps1` independently builds a self-contained CLI and Windows hook, then embeds them and both Linux hooks in the single-file application. It does not require Inno Setup or a prior installer build. Tools are extracted lazily into `%LOCALAPPDATA%\agwinterm\portable-tools\<payload-hash>`, keeping installed wrappers valid across app updates. For headless extraction without changing PATH, run the portable exe with `--extract-tools <directory>`; this creates a content-addressed subdirectory. `tests/integration/portable-tools.ps1` verifies the shipped exe in isolation from build-stage sidecars.
 
 `build.ps1`:
 1. publishes `Agwinterm.Win32` (the app) and `Agwinterm.Ctl` (`agwintermctl`) as **self-contained win-x64**

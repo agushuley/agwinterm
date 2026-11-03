@@ -1,0 +1,14 @@
+**/.git
+**/.vs
+**/bin/
+**/obj/
+**/target/
+installer/stage/
+installer/stage-*/
+installer/stage-portable/
+installer/Output/
+native/target/
+qa/
+docs/
+.github/
+fonts/

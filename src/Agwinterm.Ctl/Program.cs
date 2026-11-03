@@ -60,6 +60,24 @@ var rest = positionals.Skip(2).ToList();
 string? Opt(string k) => options.TryGetValue(k, out var v) ? v : null;
 string? DefaultTarget() => Opt("target") ?? Environment.GetEnvironmentVariable("AGWINTERM_SESSION_ID");
 
+bool ReadEnvironmentFile(string path, out JsonElement value)
+{
+    value = default;
+    try
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        if (document.RootElement.ValueKind != JsonValueKind.Object) throw new FormatException();
+        Agwinterm.Pty.EnvironmentOverrides.ReadJson(document.RootElement);
+        value = document.RootElement.Clone();
+        return true;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or FormatException)
+    {
+        Console.Error.WriteLine("Cannot read settings file: expected a readable JSON object with valid environment string values.");
+        return false;
+    }
+}
+
 string cmd;
 string? target = null;
 var cargs = new Dictionary<string, object?>();
@@ -70,6 +88,19 @@ bool printTextField = false;
 
 switch (area)
 {
+    case "environment":
+        if (sub is not ("get" or "set")) { Console.Error.WriteLine("environment requires get or set"); return 2; }
+        cmd = "environment." + sub;
+        string scope = Opt("scope") ?? "global";
+        cargs["scope"] = scope;
+        target = Opt("target") ?? (scope == "session" ? DefaultTarget() : null);
+        if (sub == "set")
+        {
+            if (Opt("file") is not { } envFile) { Console.Error.WriteLine("environment set requires --file <JSON file>"); return 2; }
+            if (!ReadEnvironmentFile(envFile, out var environment)) return 2;
+            cargs["env"] = environment;
+        }
+        break;
     case "ping": cmd = "ping"; break;
     case "version": cmd = "version"; break;   // handled locally, below: needs the resolved pipe name
     case "tree": cmd = "tree"; break;
@@ -79,10 +110,10 @@ switch (area)
         if (Opt("limit") is { } limV && int.TryParse(limV, out var limN)) cargs["limit"] = limN;
         target = null;
         break;
-    case "install" when sub == "hooks": cmd = "install.hooks"; break;
-    case "install" when sub == "skill": cmd = "install.skill"; break;
-    case "install" when sub == "shell": cmd = "install.shell"; break;
-    case "install" when sub == "cli": cmd = "install.cli"; if (options.ContainsKey("remove")) cargs["remove"] = true; break;
+    case "install" when sub == "hooks": cmd = "install.hooks"; target = DefaultTarget(); break;
+    case "install" when sub == "skill": cmd = "install.skill"; target = DefaultTarget(); break;
+    case "install" when sub == "shell": cmd = "install.shell"; target = DefaultTarget(); break;
+    case "install" when sub == "cli": cmd = "install.cli"; target = DefaultTarget(); if (options.ContainsKey("remove")) cargs["remove"] = true; break;
     case "omp" when sub == "list": cmd = "omp.list"; break;
     case "omp" when sub == "set":
         cmd = "omp.set";
@@ -99,7 +130,16 @@ switch (area)
                 if (Opt("name") is { } wsname) cargs["name"] = wsname;
                 else if (rest.Count > 0) cargs["name"] = rest[0];
                 if (Opt("default-dir") is { } wsdd) cargs["default-dir"] = wsdd;
+                if (Opt("default-profile") is { } wsProfile) cargs["defaultProfile"] = wsProfile;
+                if (Opt("env-file") is { } wsEnvFile)
+                {
+                    if (!ReadEnvironmentFile(wsEnvFile, out var wsEnvironment)) return 2;
+                    cargs["env"] = wsEnvironment;
+                }
                 target = null;
+                break;
+            case "settings":
+                cmd = "workspace.settings";
                 break;
             case "default-dir":
                 if (rest.Count > 0 && rest[0] == "clear")
@@ -198,6 +238,11 @@ switch (area)
                 if (Opt("workspace-name") is { } wsn) cargs["workspace-name"] = wsn;
                 if (options.ContainsKey("create-workspace")) cargs["create-workspace"] = true;
                 if (Opt("profile") is { } prof) cargs["profile"] = prof;
+                if (Opt("env-file") is { } sessionEnvFile)
+                {
+                    if (!ReadEnvironmentFile(sessionEnvFile, out var sessionEnvironment)) return 2;
+                    cargs["env"] = sessionEnvironment;
+                }
                 if (options.ContainsKey("no-select")) cargs["no-select"] = true;   // create in background, keep focus
                 if (options.ContainsKey("wait")) cargs["wait"] = true;             // PowerShell keeps its interactive prompt; direct mode refuses this flag
                 // Who is asking: the pane this CLI runs in, the same AGWINTERM_SESSION_ID every other
@@ -426,7 +471,12 @@ switch (area)
                 break;
             case "focus": cargs["dir"] = rest.Count > 0 ? rest[0] : "other"; break; // primary|split|left|right|top|bottom|other — `other` is the one word valid on either axis
             case "flag": cargs["op"] = rest.Count > 0 ? rest[0] : "toggle"; break; // on|off|toggle|clear
-            case "bind": cargs["agent"] = rest.Count > 0 ? rest[0] : "claude"; break; // bind a resumable agent (claude) | none to clear
+            case "bind":
+                cargs["agent"] = rest.Count > 0 ? rest[0] : "claude";
+                if (Opt("resume") is { } resumeId) cargs["resume"] = resumeId;
+                if (Opt("pid") is { } hookPid && int.TryParse(hookPid, out int hp)) cargs["pid"] = hp;
+                if (Opt("cwd") is { } hookCwd) cargs["cwd"] = hookCwd;
+                break;
             case "restore": cargs["command"] = rest.Count > 0 ? string.Join(' ', rest) : (Opt("command") ?? ""); break; // pin a per-pane restore command | none to clear
             case "background": // session background set <path> [--opacity N] [--mode fit|fill|center|tile] | background clear
                 cargs["action"] = rest.Count > 0 ? rest[0] : "set";
@@ -652,13 +702,13 @@ switch (area)
 
 // install.skill is a self-contained file-write (writes SKILL.md to ~/.claude & ~/.codex); run it
 // locally so it works with no running app / pipe (e.g. from the installer, incl. silent installs).
-if (cmd == "install.skill")
+if (cmd == "install.skill" && target is null && Opt("window") is null)
 {
     Console.WriteLine(Agwinterm.Pty.AgentSkill.Install());
     return 0;
 }
 // install.cli (PATH edit) and omp.list (file enumeration) are self-contained too — run locally.
-if (cmd == "install.cli")
+if (cmd == "install.cli" && target is null && Opt("window") is null)
 {
     Console.WriteLine(options.ContainsKey("remove")
         ? Agwinterm.Pty.CliInstaller.Uninstall() : Agwinterm.Pty.CliInstaller.Install());

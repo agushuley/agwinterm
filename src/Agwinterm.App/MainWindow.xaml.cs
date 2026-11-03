@@ -497,8 +497,9 @@ public sealed partial class MainWindow : Window, ISessionHost
             )).ToList();
     }
 
-    public string NewSession(string? name, string? cwd, string? workspace)
+    public string NewSession(SessionCreateRequest request)
     {
+        var name = request.Name; var cwd = request.Cwd; var workspace = request.Workspace;
         string id = Guid.NewGuid().ToString();
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -531,7 +532,7 @@ public sealed partial class MainWindow : Window, ISessionHost
         return true;
     }
 
-    public string NewWorkspace(string? name, string? defaultDir = null)
+    public string NewWorkspace(string? name, WorkspaceOptions? options = null)
     {
         string id = Guid.NewGuid().ToString();
         DispatcherQueue.TryEnqueue(() => CreateWorkspace(id, name));

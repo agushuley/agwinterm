@@ -18,10 +18,20 @@ permissions:
   attestations: write
 
 jobs:
+  wsl-hook:
+    uses: ./.github/workflows/wsl-hook.yml
+
   installer:
+    needs: wsl-hook
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wsl-hook-*
+          merge-multiple: true
+          path: artifacts/wsl-hook
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

@@ -1,0 +1,41 @@
+# Portable agwinterm (single-file win-x64) without a host .NET SDK.
+# Cross-compiles net10.0-windows from the Linux SDK image (EnableWindowsTargeting).
+FROM rust:1.90-bookworm AS helpers
+RUN apt-get update && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 python3 zsh \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu
+WORKDIR /repo
+COPY native/ native/
+COPY src/Agwinterm.Pty/Wsl/ src/Agwinterm.Pty/Wsl/
+COPY tests/integration/wsl-scripts.py tests/integration/wsl-scripts.py
+RUN RUSTFLAGS="-C linker=rust-lld" cargo test --locked --manifest-path native/Cargo.toml -p agwinterm-hook --target x86_64-unknown-linux-musl \
+    && RUSTFLAGS="-C linker=rust-lld" cargo build --locked --release --manifest-path native/Cargo.toml -p agwinterm-hook --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl \
+    && cargo build --locked --release --manifest-path native/Cargo.toml -p agwinterm-hook --target x86_64-pc-windows-gnu \
+    && mkdir -p /helpers artifacts/wsl-hook \
+    && cp native/target/x86_64-unknown-linux-musl/release/agwinterm-hook /helpers/agwinterm-hook-linux-x64 \
+    && cp native/target/aarch64-unknown-linux-musl/release/agwinterm-hook /helpers/agwinterm-hook-linux-arm64 \
+    && cp native/target/x86_64-pc-windows-gnu/release/agwinterm-hook.exe /helpers/ \
+    && cp /helpers/agwinterm-hook-linux-* artifacts/wsl-hook/ \
+    && AGWINTERM_TEST_POSIX_PATHS=1 python3 tests/integration/wsl-scripts.py
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0.301-noble
+
+RUN apt-get update && apt-get install -y --no-install-recommends zip \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=helpers /helpers/ /helpers/
+WORKDIR /repo
+ENV DOTNET_EnableWindowsTargeting=true \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+
+COPY global.json Agwinterm.slnx ./
+COPY src/ src/
+COPY themes/ themes/
+COPY installer/agwinterm.iss installer/agwinterm.iss
+COPY docker/build-portable-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ARG GIT_SHA
+ENV GIT_SHA=${GIT_SHA}
+
+ENTRYPOINT ["/entrypoint.sh"]

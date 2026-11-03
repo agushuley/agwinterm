@@ -50,10 +50,10 @@ public static class AgentResume
     public static string? AgentOf(ProcRow p)
     {
         string name = p.Name.ToLowerInvariant();
-        if (name == "claude.exe") return "claude";
-        if (name == "codex.exe") return "codex";
-        if (name == "devin.exe") return "devin";
-        if (name == "node.exe")
+        if (name is "claude.exe" or "claude") return "claude";
+        if (name is "codex.exe" or "codex") return "codex";
+        if (name is "devin.exe" or "devin") return "devin";
+        if (name is "node.exe" or "node")
         {
             string cmd = p.CommandLine.Replace('\\', '/');
             if (cmd.Contains("@anthropic-ai/claude-code", StringComparison.OrdinalIgnoreCase)) return "claude";

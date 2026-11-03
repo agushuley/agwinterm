@@ -394,6 +394,7 @@ internal partial class Program : ISessionHost, IWindowHost
         public string? CustomName; // user-renamed title (null = show the cwd/OSC title in the title bar, agterm-style)
         public string? Context;    // session.context: one line of "what is this pane for", set over the API (P3); drawn dimmed beside the name; persisted; null = none. Per session, not per pane — SessionContexts holds the rules.
         public string? ProfileName; // shell profile this session launched with (null = default; persisted)
+        public IReadOnlyDictionary<string, string> Env = EnvironmentOverrides.Empty;
         public Pane? Scratch;      // per-session scratch terminal (lazy; kept alive when hidden; not restored)
         // The SESSION-WIDE overlay slot (Wave B3): an ephemeral program run over the whole session —
         // every pane, and any pane overlay under it — shown as the kind-3 cover while the session is
@@ -419,7 +420,8 @@ internal partial class Program : ISessionHost, IWindowHost
         public required string Name;
         public readonly List<Ses> Sessions = new();
         public bool Expanded = true;
-        public string? DefaultDir;
+        public WorkspaceOptions Options = new();
+        public string? DefaultDir => Options.DefaultDir;
     }
 
     /// <summary>One overlay slot (P5): the ONE type behind the session-wide slot (<see cref="Ses.Overlay"/>,
@@ -554,6 +556,12 @@ internal partial class Program : ISessionHost, IWindowHost
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args is ["--extract-tools", var toolsRoot])
+        {
+            try { CliInstaller.ExtractPortableTools(toolsRoot); }
+            catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+            return;
+        }
         ParseLaunchArgs(args);
         // Publish the resolved instance id so child processes and shared (Pty) helpers resolve the same
         // data dir — and a nested agwinterm inherits the dev/release identity of the one that launched it.
@@ -687,12 +695,12 @@ internal partial class Program : ISessionHost, IWindowHost
         if (_geoValid) ClampGeoToVisibleScreen(ref _geoX, ref _geoY, ref _geoW, ref _geoH);
         _creating = this;                    // so the WindowProc trampoline can resolve us during CreateWindowExW
         _hwnd = _isQuickWindow
-            ? CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, ClassName, "agwinterm quick terminal", WS_POPUP,
+            ? CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, ClassName, "agwinterm quick terminal", WS_POPUP | WS_CLIPCHILDREN,
                 0, 0, 640, 480, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero)
             : _geoValid
-            ? CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW,
+            ? CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 _geoX, _geoY, _geoW, _geoH, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero)
-            : CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW,
+            : CreateWindowExW(0, ClassName, AppName, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 CW_USEDEFAULT, CW_USEDEFAULT, 1040, 660, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
         _creating = null;
         if (_hwnd == IntPtr.Zero)
@@ -955,12 +963,12 @@ internal partial class Program : ISessionHost, IWindowHost
             nodes.Add(new Uia.Node
             {
                 Kind = Uia.NodeKind.SettingsGroup,
-                Name = "Settings",
+                Name = SettingsTitle,
                 Parent = 0,
                 Rect = ScreenRect(_setCard.Left, _setCard.Top, _setCard.Right - _setCard.Left, _setCard.Bottom - _setCard.Top),
             });
             var gkids = new List<int>();
-            for (int i = 0; i < SetTabNames.Length; i++)   // tab items (invokable; current one marked)
+            for (int i = 0; i < SettingsTabs.Length; i++)   // tab items (invokable; current one marked)
             {
                 gkids.Add(nodes.Count);
                 nodes.Add(new Uia.Node
@@ -968,13 +976,13 @@ internal partial class Program : ISessionHost, IWindowHost
                     Kind = Uia.NodeKind.SettingsTab,
                     Index = i,
                     Parent = grp,
-                    Name = SetTabNames[i] + (i == _setTab ? " tab, selected" : " tab"),
+                    Name = SettingsTabs[i] + (i == _setTab ? " tab, selected" : " tab"),
                     Selected = i == _setTab,
                     Focused = _setNav == i,
                     Rect = ScreenRect(_setCard.Left + 8f, _navHit[i * 2], SetNavW - 16f, _navHit[i * 2 + 1] - _navHit[i * 2]),
                 });
             }
-            var srows = FocusableRows();
+            var srows = FocusableRows(includeDisabled: true);
             for (int i = 0; i < srows.Count; i++)
             {
                 var r = srows[i];
@@ -985,6 +993,7 @@ internal partial class Program : ISessionHost, IWindowHost
                     Index = r.UiaIdentity,
                     Parent = grp,
                     Name = SettingsControlName(r),
+                    Enabled = SettingsRowEnabled(r),
                     Focused = _setNav < 0 && ReferenceEquals(r, _setFocus),
                     Rect = r.Vis ? ScreenRect(r.Hx0, r.Hy0, Math.Max(1, r.Hx1 - r.Hx0), Math.Max(1, r.Hy1 - r.Hy0)) : default,
                 });
@@ -1084,7 +1093,7 @@ internal partial class Program : ISessionHost, IWindowHost
             SW.Toggle => IsOn(ConfigValue(r.Key)) ? "on" : "off",
             SW.Slider => ConfigValue(r.Key),
             SW.Dropdown or SW.Sound => CurrentDropdownText(r),
-            SW.Path => ConfigValue(r.Key) is { Length: > 0 } p ? p : "not set",
+            SW.Path => SettingsRowValue(r) is { Length: > 0 } p ? p : "not set",
             SW.Profile => string.Equals(r.Key, _profileCfg.Default, StringComparison.OrdinalIgnoreCase) ? "default" : "not default",
             _ => "",
         };
@@ -1110,11 +1119,11 @@ internal partial class Program : ISessionHost, IWindowHost
             var row = FocusableRows().FirstOrDefault(r => r.UiaIdentity == index);
             if (row is not null) { _setFocus = row; ActivateSetFocus(); }
         }
-        else if (kind == Uia.NodeKind.SettingsTab && _setOpen && index >= 0 && index < SetTabNames.Length)
+        else if (kind == Uia.NodeKind.SettingsTab && _setOpen && index >= 0 && index < SettingsTabs.Length)
         {
             _setTab = index; _setScroll = 0;
             _setFocus = FocusableRows().FirstOrDefault();
-            _uia.Announce($"{SetTabNames[index]} tab");
+            _uia.Announce($"{SettingsTabs[index]} tab");
             RequestRedraw();
         }
     }
@@ -1134,7 +1143,7 @@ internal partial class Program : ISessionHost, IWindowHost
                 if (_setOpen && row is not null) { _setNav = -1; _setFocus = row; _setFocusKb = true; AfterSetFocus(); }
                 break;
             case Uia.NodeKind.SettingsTab:
-                if (_setOpen && index >= 0 && index < SetTabNames.Length) { _setNav = index; _setFocusKb = true; AfterHeaderFocus(); }
+                if (_setOpen && index >= 0 && index < SettingsTabs.Length) { _setNav = index; _setFocusKb = true; AfterHeaderFocus(); }
                 break;
             case Uia.NodeKind.Session:
                 var session = AllSessions().FirstOrDefault(s => s.UiaIdentity == index);

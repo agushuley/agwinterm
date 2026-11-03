@@ -25,7 +25,10 @@ public sealed record SessionSnapshot(string Id, string Name, bool Active, AgentS
     IReadOnlyList<string?>? ForegroundShells = null);
 
 /// <summary>A workspace (with its sessions) for the control-API tree.</summary>
-public sealed record WorkspaceSnapshot(string Id, string Name, bool Active, IReadOnlyList<SessionSnapshot> Sessions, bool Collapsed = false, string? DefaultDir = null);
+public sealed record WorkspaceSnapshot(string Id, string Name, bool Active, IReadOnlyList<SessionSnapshot> Sessions, bool Collapsed = false, WorkspaceOptions? Options = null)
+{
+    public string? DefaultDir => Options?.DefaultDir;
+}
 
 /// <summary>Where a <c>session.restore</c> call landed: the pane the target resolved to and the session
 /// that owns it, so the reply can name both — a split has several panes and the caller cannot otherwise
@@ -103,16 +106,16 @@ public interface ISessionHost
 
     /// <summary>
     /// Create a session; returns its id. Optionally in a workspace (by id/prefix via
-    /// <paramref name="workspace"/>, or by sidebar label via <paramref name="workspaceName"/> +
-    /// <paramref name="createWorkspace"/>), running <paramref name="command"/> as PowerShell code with an interactive prompt afterward.
-    /// <paramref name="commandMode"/> = direct runs executable + arguments without a shell;
+    /// <c>workspace</c>, or by sidebar label via <c>workspaceName</c> +
+    /// <c>createWorkspace</c>), running <c>command</c> as PowerShell code with an interactive prompt afterward.
+    /// <c>commandMode</c> = direct runs executable + arguments without a shell;
     /// wait is accepted only in PowerShell mode, whose prompt already stays open. A workspace that does not resolve — an unknown id/prefix, or an
-    /// unknown name without <paramref name="createWorkspace"/> — is <b>refused</b> with
+    /// unknown name without <c>createWorkspace</c> — is <b>refused</b> with
     /// <see cref="RefusePrefix"/> + the <see cref="SessionNewWorkspaces"/> wording, and no session
     /// is created; it is never swapped for the active workspace (P2, decision 1). The host resolves
     /// the workspace before it mints the id, so a refusal cannot leave an orphan behind ok:false.
     /// <para>With neither workspace argument the session lands in the workspace of the
-    /// <paramref name="caller"/>'s pane — the pane that ran <c>session new</c>, which the CLI sends
+    /// <c>caller</c>'s pane — the pane that ran <c>session new</c>, which the CLI sends
     /// from its <c>AGWINTERM_SESSION_ID</c> — so an agent gets sessions next to itself. The ACTIVE
     /// workspace is the <b>last</b> answer, not the first: it is a global the UI rewrites on every
     /// click and selection, and reading it made a bare <c>session new</c> land wherever the user
@@ -121,23 +124,27 @@ public interface ISessionHost
     /// unrelated shell); a stale caller is <b>not</b> refused, because refusing would break a working
     /// script to fix a preference. Resolved synchronously, before the creation is posted.</para>
     /// </summary>
-    string NewSession(string? name, string? cwd, string? workspace, string? command = null,
-        string? workspaceName = null, bool createWorkspace = false, string? profile = null, bool noSelect = false, bool wait = false,
-        string? caller = null, string? commandMode = null);
+    string NewSession(SessionCreateRequest request);
+
+    string EnvironmentGet(string scope, string? target) => RefusePrefix + "environment settings are unavailable in this host";
+    string EnvironmentSet(string scope, string? target, IReadOnlyDictionary<string, string> env) => RefusePrefix + "environment settings are unavailable in this host";
+    string WorkspaceSettings(string? target, WorkspaceOptions? options) => RefusePrefix + "workspace settings are unavailable in this host";
 
     /// <summary>Clone a session (same cwd + shell profile); returns the new session id. (agterm #234)</summary>
     string DuplicateSession(string? target);
 
     /// <summary>List the configured shell profiles (name, command, default marker).</summary>
     string ProfilesList();
+    /// <summary>Snapshot the target's integration environment on the UI thread. Unknown targets fail.</summary>
+    ShellProfile? IntegrationProfile(string? target) => null;
     /// <summary>Reload profiles.json from disk.</summary>
     string ProfilesReload();
 
     bool SelectSession(string target);
     bool CloseSession(string target);
 
-    /// <summary>Create a workspace; returns its id. Optional <paramref name="defaultDir"/> is normalized and stored when valid.</summary>
-    string NewWorkspace(string? name, string? defaultDir = null);
+    /// <summary>Create a workspace; returns its id. Optional workspace defaults are validated and stored together.</summary>
+    string NewWorkspace(string? name, WorkspaceOptions? options = null);
 
     /// <summary><c>workspace.default-dir</c>: set (<paramref name="dir"/> non-empty), or clear (<paramref name="dir"/> null/empty).</summary>
     string WorkspaceDefaultDir(string? target, string? dir) => RefusePrefix + "workspace default directory is unavailable in this host";
@@ -533,7 +540,7 @@ public interface ISessionHost
     /// relaunch line for the pane's shell. The server has validated <paramref name="agent"/> and
     /// <paramref name="sessionId"/>. Returns false if the target pane isn't found; the tree check and the
     /// write happen after the reply, and their outcome is a <c>bind</c> event.</summary>
-    bool SessionBindResume(string? target, string agent, string sessionId, string? cwd, int hookPid);
+    bool SessionBindResume(string? target, string agent, string sessionId, string? cwd, int hookPid, WslHookReport? report = null);
     /// <summary>Pin a restore command on a pane, re-run every restart (agterm #271); <paramref name="command"/>
     /// null clears. The server has already refused an empty / "active" target and folded ""/"none" into
     /// null. Resolves <paramref name="target"/> the way every other content verb does (exact pane, exact
@@ -649,15 +656,13 @@ public sealed class SingleSessionHost : ISessionHost
             new[] { new SessionSnapshot("single", "session", true, _session.Status,
                                         StatusChangedAt: _session.StatusChangedAt) }) };
     public WindowStateSnapshot WindowState() => new(true, false, false, false, "ws", "single");
-    public string NewSession(string? name, string? cwd, string? workspace, string? command = null,
-        string? workspaceName = null, bool createWorkspace = false, string? profile = null, bool noSelect = false, bool wait = false,
-        string? caller = null, string? commandMode = null) => "single";
+    public string NewSession(SessionCreateRequest request) => "single";
     public string DuplicateSession(string? target) => "";
     public string ProfilesList() => "Windows PowerShell";
     public string ProfilesReload() => "0 profiles loaded";
     public bool SelectSession(string target) => true;
     public bool CloseSession(string target) => false;
-    public string NewWorkspace(string? name, string? defaultDir = null) => "ws";
+    public string NewWorkspace(string? name, WorkspaceOptions? options = null) => "ws";
     public string WorkspaceDefaultDir(string? target, string? dir) => ISessionHost.RefusePrefix + WorkspaceDefaultDirs.NoWorkspace;
     public bool SetFontSize(string? target, string op) => false; // no per-session font zoom in the single-session host
     public bool Dashboard(bool close, string? ids, int fontSize) => false; // no dashboard in the single-session host
@@ -713,7 +718,7 @@ public sealed class SingleSessionHost : ISessionHost
     public bool Notify(string? target, string? title, string body, NotificationCategory category) => false;
     public bool SessionFlag(string? target, string op) => false;
     public bool SessionBind(string? target, string agent) => false;
-    public bool SessionBindResume(string? target, string agent, string sessionId, string? cwd, int hookPid) => false;
+    public bool SessionBindResume(string? target, string agent, string sessionId, string? cwd, int hookPid, WslHookReport? report = null) => false;
     public RestorePinTarget? SessionRestore(string target, string? command) => null;
     public RestoreCaptureResult RestoreCapture(string? target) =>
         string.IsNullOrEmpty(target) || target == "active"

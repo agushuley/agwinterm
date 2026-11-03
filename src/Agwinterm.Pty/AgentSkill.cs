@@ -480,6 +480,9 @@ public static class AgentSkill
           memory the same way — their save is best-effort and silent.
         - `agwintermctl install hooks|skill|shell`               — install agent-status hooks / this skill / shell-integration (live cwd)
         - `agwintermctl install cli [--remove]`                  — add (or remove) agwintermctl on the user PATH
+          Installation uses the caller's session profile (or `--target ID`): WSL installs into that distribution/user's Linux home.
+          WSL integration uses the bundled native Linux x64 helper and Windows interop; Python is not required. Shell integration supports bash/zsh. Run `profiles reload` to discover newly installed distributions.
+          Linux file arguments read by the Windows CLI, such as `image show`, need `wslpath -w`; session cwd arguments remain Linux paths.
         - `agwintermctl omp list` / `omp set <name> [--persist]` — list / apply oh-my-posh themes (live; --persist keeps it for new sessions).
           A name that resolves to no theme is REFUSED (`ok:false`, the theme in effect unchanged) — it used to answer `ok:true` with the text.
 

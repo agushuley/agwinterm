@@ -7,6 +7,7 @@ replies a script can rely on, and the ones that answer a question a script would
 guess at.
 
 Related pages: [launching a session command](session-commands.md), [session HUD](session-hud.md),
+[workspace settings and environment](workspace-settings.md),
 [workspace navigation](navigation.md), [quick terminal](quick-terminal.md),
 [native picker](native-picker.md), [`image frameshm`](specs/image-frameshm.md). The subset agliteterm
 shares is canonical in [`tests/conformance/control-api.json`](../tests/conformance/control-api.json).
@@ -224,6 +225,8 @@ Replies `{action, pane, session}` instead of the word "pinned".
 
 ## `session.bind` from a SessionStart hook
 
+For a WSL profile, `pid` is a Linux PID in that profile's distribution and user context. The host reads `/proc` there while the hook is alive, verifies `AGWINTERM_SESSION_ID`, and never looks up that PID in the Windows process table. The CLI accepts `session bind <agent> --resume <id> --pid <pid> --cwd <Linux path>`.
+
 `install hooks` makes the `SessionStart` hook of Claude Code, Codex and Devin send
 `{"cmd":"session.bind","target":"<pane>","args":{"agent":"claude|codex|devin","resume":"<session id>","cwd":"<dir>","pid":<hook pid>}}`.
 Devin's event has no `cwd`, so its hook sends `DEVIN_PROJECT_DIR`, the project root Devin runs in.
@@ -242,6 +245,8 @@ for the reply because the walk starts at its own process.
   `none` clears it.
 
 ## `restore capture`
+
+WSL panes use the Linux terminal's foreground process group, scoped by pane identity; Windows panes continue to use the Windows process snapshot.
 
 `restore capture [--target ID]` fills the captured-command slot of every real pane (or of one)
 **now** and saves, and replies per pane with what it found. Before this verb the capture ran exactly

@@ -1,0 +1,46 @@
+name: Linux WSL helpers
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test shells and Rust target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+          rustup target add ${{ matrix.target }}
+      - name: Build and execute static helper tests
+        env:
+          RUSTFLAGS: -C linker=rust-lld
+        run: |
+          cargo test --locked --manifest-path native/Cargo.toml -p agwinterm-hook --target ${{ matrix.target }}
+          cargo build --locked --release --manifest-path native/Cargo.toml -p agwinterm-hook --target ${{ matrix.target }}
+          mkdir -p artifacts/wsl-hook
+          cp native/target/${{ matrix.target }}/release/agwinterm-hook artifacts/wsl-hook/agwinterm-hook-linux-${{ matrix.arch }}
+      - name: Test installers and bootstrap on native Linux
+        # Only path conversion is stubbed; Windows interop is exercised by the WSL suite.
+        env:
+          AGWINTERM_TEST_POSIX_PATHS: '1'
+        run: python3 tests/integration/wsl-scripts.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-hook-${{ matrix.arch }}
+          path: artifacts/wsl-hook/agwinterm-hook-linux-${{ matrix.arch }}
+          if-no-files-found: error

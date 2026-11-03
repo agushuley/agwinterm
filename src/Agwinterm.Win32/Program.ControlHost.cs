@@ -217,7 +217,7 @@ internal partial class Program
                                              .Select(t => OverlayPanes.Word(t.i)).ToList(), Hud: s.Hud,
                         ForegroundShells: s.Panes.Select(p => p.S.HasExited ? null : shells.GetValueOrDefault(p)).ToList());
                 }).ToList()
-            , Collapsed: !w.Expanded, DefaultDir: w.DefaultDir)).ToList();
+            , Collapsed: !w.Expanded, Options: w.Options)).ToList();
     }
 
     // Read-back snapshot: plain field reads + a Win32 query, safe from the pipe thread (worst case slightly stale).
@@ -298,10 +298,10 @@ internal partial class Program
     // ran `session new` (the CLI sends its AGWINTERM_SESSION_ID), so an agent gets sessions next to
     // itself however the user has clicked around meanwhile. Only a missing or stale caller reaches
     // the active workspace, and that too is read here, synchronously, rather than inside the Post.
-    public string NewSession(string? name, string? cwd, string? workspace, string? command = null,
-        string? workspaceName = null, bool createWorkspace = false, string? profile = null, bool noSelect = false, bool wait = false,
-        string? caller = null, string? commandMode = null)
+    public string NewSession(SessionCreateRequest request)
     {
+        var (name, cwd, workspace, command, workspaceName, createWorkspace, profile, noSelect, wait, caller, commandMode, env) = request;
+        env = env is null ? EnvironmentOverrides.Empty : EnvironmentOverrides.Snapshot(env);
         if (!SessionCommand.TryCreate(command, commandMode, wait, profile, out var launch, out var error))
             return ISessionHost.RefusePrefix + error;
         Workspace? ws = null;
@@ -363,7 +363,7 @@ internal partial class Program
                 target ??= CreateWorkspace(Guid.NewGuid().ToString(), newWorkspaceName!);
             }
             // --no-select creates the session in the background, leaving the current focus/selection (agterm #250).
-            CreateSession(id, name, cwd, target, makeActive: !noSelect, profileName: profile, sessionCommand: launch);
+            CreateSession(id, name, cwd, target, makeActive: !noSelect, profileName: profile, sessionCommand: launch, sessionEnv: env);
         });
         return id;
     }
@@ -384,21 +384,12 @@ internal partial class Program
         return true;
     }
 
-    public string NewWorkspace(string? name, string? defaultDir = null)
+    public string NewWorkspace(string? name, WorkspaceOptions? options = null)
     {
+        options = SnapshotWorkspaceOptions(options ?? new());
+        if (ValidateWorkspaceOptions(options) is { } error) return ISessionHost.RefusePrefix + error;
         string id = Guid.NewGuid().ToString();
-        PostVerb(() =>
-        {
-            var ws = CreateWorkspace(id, name);
-            if (!string.IsNullOrEmpty(defaultDir))
-            {
-                if (TrySetWorkspaceDefaultDir(ws, defaultDir, out _))
-                {
-                    SaveState();
-                    EmitEvent("tree");
-                }
-            }
-        });
+        PostVerb(() => CreateWorkspace(id, name, options));
         return id;
     }
 
@@ -721,7 +712,22 @@ internal partial class Program
 
     public string ProfilesList() => InvokeOnUi(() => string.Join("\n", _profileCfg.Profiles.Select(p =>
         $"{(p.Name.Equals(_profileCfg.Default, StringComparison.OrdinalIgnoreCase) ? "*" : " ")} {p.Name}\t{p.Command}{(p.Args is { Length: > 0 } a ? " " + string.Join(" ", a) : "")}")));
-    public string ProfilesReload() => InvokeOnUi(() => { _profileCfg = Agwinterm.Pty.ShellProfiles.Load(AppDir); RequestRedraw(); return $"{_profileCfg.Profiles.Count} profiles loaded"; });
+    public string ProfilesReload()
+    {
+        var profiles = ShellProfiles.Reload(AppDir); // WSL discovery stays off the UI thread.
+        return InvokeOnUiQueued(() => { _profileCfg = profiles; RequestRedraw(); return $"{_profileCfg.Profiles.Count} profiles loaded"; });
+    }
+
+    public ShellProfile? IntegrationProfile(string? target) => InvokeOnUiQueued(() => IntegrationProfileOnUi(target));
+
+    private ShellProfile? IntegrationProfileOnUi(string? target)
+    {
+        var ses = FindSesForTarget(target);
+        if (ses is null && !string.IsNullOrEmpty(target) && target != "active")
+            throw new ArgumentException("session not found");
+        var profile = ResolveProfile(ses?.ProfileName);
+        return profile is null ? null : new ShellProfile { Name = profile.Name, Command = profile.Command, Args = profile.Args?.ToArray(), Env = EnvironmentOverrides.Merge(ReadGlobalEnvironment(), profile.Env, ses?.Ws.Options.Env, ses?.Env) };
+    }
 
     public string RestoreClear()
     {
@@ -1274,13 +1280,40 @@ internal partial class Program
     // because the hook exits as soon as it is answered. The command lines (a CIM query, ~1 s) are read
     // after it, off the pipe thread: the agent and the shell outlive the hook. The outcome, bound or
     // ignored with the reason, is a `bind` event.
-    public bool SessionBindResume(string? target, string agent, string sessionId, string? cwd, int hookPid)
+    public bool SessionBindResume(string? target, string agent, string sessionId, string? cwd, int hookPid, WslHookReport? report = null)
     {
         if (string.IsNullOrEmpty(target)) return false;
         var hit = FindPaneById(target!);
         if (hit is null) return false;
         var pane = hit.Value.pane;
         int seq = Interlocked.Increment(ref pane.BindSeq);
+        var profile = IntegrationProfile(target);
+        if (profile is not null && WslIntegration.IsWsl(profile.Command))
+        {
+            // Linux PIDs never enter the Windows process lookup. Read while the hook is alive.
+            try
+            {
+                IReadOnlyDictionary<int, AgentResume.ProcRow> procs;
+                if (report is null) procs = WslIntegration.Ancestry(profile, hookPid, pane.Id);
+                else
+                {
+                    try { procs = report.Verify(profile, hookPid, pane.Id); }
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                    {
+                        procs = WslIntegration.NativeAncestry(profile, hookPid, pane.Id);
+                    }
+                }
+                string? command = AgentResume.FindAgentCommandLine(procs, hookPid, 0, agent, out string? why);
+                if (command is null) { EmitEvent("bind", pane.Id, "ignored: " + why); return true; }
+                string relaunch = AgentResume.Compose(AgentResume.ShellKind.Bash, agent, sessionId, cwd,
+                    AgentResume.ResumeFlags(agent, command));
+                Post(() => { if (Volatile.Read(ref pane.BindSeq) == seq) { pane.AgentResume = relaunch; SaveState(); } });
+                EmitEvent("bind", pane.Id, "bound: " + relaunch);
+                return true;
+            }
+            catch (Exception ex) { EmitEvent("bind", pane.Id, "ignored: " + ex.Message); return false; }
+        }
+        if (report is not null) return false; // Linux observations cannot bind Windows panes.
         var chain = SnapshotAncestry(hookPid);
         int? shellPid = pane.S.ChildProcessId;
         var shell = Agwinterm.Pty.AgentResume.ClassifyShell(ResolveProfile(hit.Value.ses?.ProfileName)?.Command ?? "powershell.exe");
@@ -1406,7 +1439,7 @@ internal partial class Program
             snap.Add((hit.Value.pane, hit.Value.ses, hit.Value.pane.S.ChildProcessId ?? 0));
         }
 
-        if (!TryCaptureForegroundCommands(snap.Select(x => x.pid).Where(pid => pid > 0), timeoutMs: 15000, out var byPid))
+        if (!TryCapturePaneCommands(snap, 15000, out var byPid))
             return RestoreCaptureResult.Refuse(RestoreCaptureReply.QueryFailed);
 
         var (result, json, stamp, landedCount) = InvokeOnUiQueued(() =>

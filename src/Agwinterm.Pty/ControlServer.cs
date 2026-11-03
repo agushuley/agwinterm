@@ -211,10 +211,6 @@ public sealed class ControlServer : IDisposable
             switch (cmd)
             {
                 case "ping": return Ok("agwinterm " + AppVersion());
-                case "install.hooks": return Ok(AgentHooks.Install());
-                case "install.skill": return Ok(AgentSkill.Install());
-                case "install.shell": return Ok(ShellIntegrationInstaller.Install());
-                case "install.cli": return Ok(GetBool(args, "remove") ? CliInstaller.Uninstall() : CliInstaller.Install());
                 case "omp.list": return Ok(string.Join("\n", OmpThemes.List().Select(t => t.Name)));
                 // ---- Wave F1b: window management (target = the window selector) ----
                 case "window.new": return _windows is null ? Err("multi-window unavailable") : Ok(_windows.WindowNew(GetString(args, "name") ?? target));
@@ -234,6 +230,9 @@ public sealed class ControlServer : IDisposable
                 return Err("window not found: " + windowSel);
 
             host = host.AuxiliaryTarget(target) ?? host;
+
+            if (cmd is "install.hooks" or "install.skill" or "install.shell" or "install.cli")
+                return Ok(WslIntegration.Install(host.IntegrationProfile(target), cmd[8..], GetBool(args, "remove")));
 
             if (host.IsQuickSurface && cmd is not ("quick" or "window.state" or "tree"
                 or "session.write" or "session.type" or "session.text" or "session.copy" or "session.status"
@@ -268,9 +267,10 @@ public sealed class ControlServer : IDisposable
                     string? commandMode = GetString(args, "command-mode");
                     if (!SessionCommand.TryCreate(GetString(args, "command"), commandMode, GetBool(args, "wait"),
                         GetString(args, "profile"), out _, out var commandError)) return Err(commandError);
-                    string created = host.NewSession(GetString(args, "name"), GetString(args, "cwd"), workspace,
+                    var sessionEnv = args.TryGetProperty("env", out var sessionEnvValue) ? EnvironmentOverrides.ReadJson(sessionEnvValue) : null;
+                    string created = host.NewSession(new SessionCreateRequest(GetString(args, "name"), GetString(args, "cwd"), workspace,
                         GetString(args, "command"), workspaceName, GetBool(args, "create-workspace"), GetString(args, "profile"), GetBool(args, "no-select"), GetBool(args, "wait"),
-                        caller: GetString(args, "caller"), commandMode: commandMode);
+                        Caller: GetString(args, "caller"), CommandMode: commandMode, Env: sessionEnv));
                     return created.StartsWith(ISessionHost.RefusePrefix, StringComparison.Ordinal)
                         ? Err(created[ISessionHost.RefusePrefix.Length..])
                         : Ok(created);
@@ -285,9 +285,29 @@ public sealed class ControlServer : IDisposable
                         string? wsDefault = GetString(args, WorkspaceDefaultDirs.Key) ?? GetString(args, "default-dir");
                         if (wsDefault is not null && WorkspaceDefaultDirs.ValidateSet(wsDefault) is { } wsDefErr) return Err(wsDefErr);
                         string? normalized = wsDefault is null ? null : WorkspaceDefaultDirs.NormalizeSet(wsDefault);
-                        return Ok(host.NewWorkspace(GetString(args, "name"), normalized));
+                        var workspaceEnv = args.TryGetProperty("env", out var workspaceEnvValue) ? EnvironmentOverrides.ReadJson(workspaceEnvValue) : null;
+                        string created = host.NewWorkspace(GetString(args, "name"), new WorkspaceOptions(normalized, SettingsString(args, "defaultProfile"), workspaceEnv));
+                        return created.StartsWith(ISessionHost.RefusePrefix, StringComparison.Ordinal)
+                            ? Err(created[ISessionHost.RefusePrefix.Length..]) : Ok(created);
                     }
                 case "workspace.default-dir": return HandleWorkspaceDefaultDir(host, target, args);
+                case "workspace.settings":
+                    {
+                        WorkspaceOptions? options = null;
+                        if (args.TryGetProperty("settings", out var settings))
+                        {
+                            if (settings.ValueKind != JsonValueKind.Object) return Err("settings must be an object");
+                            string? directory = SettingsString(settings, "defaultDir");
+                            if (directory is not null && WorkspaceDefaultDirs.ValidateSet(directory) is { } invalid) return Err(invalid);
+                            options = new WorkspaceOptions(directory is null ? null : WorkspaceDefaultDirs.NormalizeSet(directory),
+                                SettingsString(settings, "defaultProfile"), settings.TryGetProperty("env", out var environment) ? EnvironmentOverrides.ReadJson(environment) : null);
+                        }
+                        return SettingsReply(host.WorkspaceSettings(target, options));
+                    }
+                case "environment.get": return SettingsReply(host.EnvironmentGet(SettingsString(args, "scope") ?? "global", target));
+                case "environment.set":
+                    if (!args.TryGetProperty("env", out var envValue)) return Err("env is required; use {} to clear overrides");
+                    return SettingsReply(host.EnvironmentSet(SettingsString(args, "scope") ?? "global", target, EnvironmentOverrides.ReadJson(envValue)));
                 case "font": return host.SetFontSize(target, GetString(args, "op") ?? "") ? Ok("font") : Err("session not found");
                 case "dashboard": return host.Dashboard(GetBool(args, "close"), GetString(args, "ids"), GetInt(args, "font-size", 0)) ? Ok("dashboard") : Err("dashboard unavailable");
 
@@ -791,6 +811,16 @@ public sealed class ControlServer : IDisposable
             : OkRaw(reply);
     }
 
+    private static string? SettingsString(JsonElement settings, string key)
+    {
+        if (!settings.TryGetProperty(key, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        if (value.ValueKind != JsonValueKind.String) throw new FormatException(key + " must be a string or null");
+        return value.GetString();
+    }
+
+    private static string SettingsReply(string reply) => reply.StartsWith(ISessionHost.RefusePrefix, StringComparison.Ordinal)
+        ? Err(reply[ISessionHost.RefusePrefix.Length..]) : OkRaw(reply);
+
     private static string HandleWorkspaceDefaultDir(ISessionHost host, string? target, JsonElement args)
     {
         string? raw = GetString(args, WorkspaceDefaultDirs.Key) ?? GetString(args, "dir");
@@ -827,7 +857,14 @@ public sealed class ControlServer : IDisposable
         int pid = args.TryGetProperty("pid", out var pv) && pv.ValueKind == JsonValueKind.Number && pv.TryGetInt32(out var p) ? p : 0;
         if (pid <= 0)
             return Err("session.bind resume: pid (the hook's process id) is required, it is how the pane's own agent is told from a nested one. Nothing bound.");
-        return host.SessionBindResume(target, agent, id!, GetString(args, "cwd"), pid) ? Ok("binding") : Err("session not found");
+        WslHookReport? report = null;
+        if (args.TryGetProperty("wsl", out var native))
+        {
+            try { report = native.Deserialize<WslHookReport>(); }
+            catch (JsonException) { return Err("Invalid native WSL hook report. Nothing bound."); }
+            if (report is null) return Err("Invalid native WSL hook report. Nothing bound.");
+        }
+        return host.SessionBindResume(target, agent, id!, GetString(args, "cwd"), pid, report) ? Ok("binding") : Err("session not found or hook report refused");
     }
 
     /// <summary>

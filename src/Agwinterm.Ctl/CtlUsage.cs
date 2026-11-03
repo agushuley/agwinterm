@@ -25,7 +25,12 @@ public static class CtlUsage
           agwintermctl ping
           agwintermctl version [--json]                  (the CLI that ran + the app serving the pipe)
           agwintermctl tree [--json]
-          agwintermctl session new [--command "PowerShell code"] [--command-mode powershell|direct] [--cwd DIR] [--name NAME] [--workspace ID|--workspace-name NAME [--create-workspace]] [--no-select]
+          agwintermctl workspace new [name] [--default-dir DIR] [--default-profile PROFILE] [--env-file FILE]
+          agwintermctl workspace settings [--target ID]  (read workspace defaults; edit in Workspace Settings)
+          agwintermctl workspace default-dir set <path>|clear [--target ID]
+          agwintermctl environment get|set [--scope global|profile|workspace|session] [--target ID] [--file FILE]
+              (set replaces overrides from a JSON string map; {} clears overrides; profile target is its name)
+          agwintermctl session new [--command "PowerShell code"] [--command-mode powershell|direct] [--cwd DIR] [--name NAME] [--workspace ID|--workspace-name NAME [--create-workspace]] [--no-select] [--env-file FILE]
               (no workspace given = the workspace of the pane running this CLI; the active one only when there is none)
                                                          (an unknown workspace is refused, never swapped for the active one)
           agwintermctl session select <target>
@@ -122,6 +127,8 @@ public static class CtlUsage
           agwintermctl image frameshm --images '[{"name":"Local\\agwinterm-frame-x","slot":0,...}]'
               (several entries applied as one all-or-nothing frame; see docs/specs/image-frameshm.md)
           agwintermctl install hooks
+          agwintermctl install cli|skill|shell [--target ID]  (uses the session's Windows/WSL environment)
+          agwintermctl session bind <agent> --resume <id> --pid <hook-pid> --cwd <directory>
         Target defaults to $AGWINTERM_SESSION_ID (the current session) when not given.
         --timeout <seconds> bounds the wait for the app's reply (default 30, 0 = no limit; a
             `session overlay open --block` waits for its overlay without a limit unless given).
