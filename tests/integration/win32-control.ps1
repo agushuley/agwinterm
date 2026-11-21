@@ -1404,7 +1404,7 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
             ((-not $badOp.ok) -and ([string]$badOp.error).Contains('sideways')) "reply=$($badOp | ConvertTo-Json -Compress)"
         Invoke-Ctl @('sidebar', 'width', '220') | Out-Null
 
-        $oscTopic = 'Review agent-' + $testToken.Substring(0, 8) + '.exe'
+        $oscTopic = 'Agent task ' + $testToken.Substring(0, 8)
         $oscTitle = "$([char]0x2733) $oscTopic"
         $oscSession = Invoke-Ctl @('session', 'new', '--command', "[Console]::Title = [string][char]0x2733 + ' $oscTopic'", '--no-select')
         if ($oscSession.ok) {
