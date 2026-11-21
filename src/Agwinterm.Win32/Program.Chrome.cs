@@ -44,6 +44,8 @@ internal partial class Program
     {
         var status = AggStatus(session);
         var pane = session.ActivePane;
+        if (pane.S.HasExited || pane.Progress.State == 0)
+            pane = session.Panes.FirstOrDefault(p => !p.S.HasExited && p.Progress.State != 0) ?? pane;
         var (state, percent) = pane.S.HasExited ? default : pane.Progress;
         var center = new System.Numerics.Vector2(x, y);
         var color = StatusColor(status == AgentStatus.Idle ? AgentStatus.Active : status);
@@ -82,7 +84,7 @@ internal partial class Program
                 rt.FillGeometry(sector, brush);
             }
         }
-        else if (status == AgentStatus.Active || state == 3)
+        else if (state == 3 || (status == AgentStatus.Active && !session.ActivePane.S.HasExited))
         {
             if (!_statusAnimationPending)
                 _statusAnimationPending = SetTimer(_hwnd, (IntPtr)StatusAnimationTimer, StatusFrameMs, IntPtr.Zero) != IntPtr.Zero;
@@ -420,6 +422,8 @@ internal partial class Program
 
     // ---- Inline rename (native child EDIT overlaid on the sidebar row) ----
 
+    private string? _sessionRenameOriginal;
+
     private void StartRename(object item)
     {
         if (item is not (Ses or Workspace)) return; // e.g. the "show all" focus banner isn't renamable
@@ -429,6 +433,7 @@ internal partial class Program
         foreach (var (y0, y1, _, it) in _sidebarRows) if (ReferenceEquals(it, item)) { ry0 = y0; ry1 = y1; break; }
         if (ry0 < 0) { RequestRedraw(); return; } // row not currently visible
         string name = item is Ses s ? s.DisplayName : ((Workspace)item).Name;
+        _sessionRenameOriginal = isWs ? null : name;
         EnsureEditGdi();
         // Fill the whole row (matches the highlight band); a left text-margin puts the text exactly
         // where the row name is drawn, so nothing shifts when editing starts.
@@ -473,11 +478,19 @@ internal partial class Program
         _editHwnd = IntPtr.Zero; _editing = null; // clear first: EN_KILLFOCUS during destroy is then a no-op
         var sb = new StringBuilder(256);
         GetWindowTextW(h, sb, 256);
-        string name = sb.ToString().Trim();
-        if (name.Length > 0)
+        string text = sb.ToString();
+        string name = text.Trim();
+        if (item is Ses s)
         {
-            if (item is Ses s) { s.Name = name; s.CustomName = name; } // CustomName drives the title bar
-            else if (item is Workspace w) w.Name = name;
+            if (text != _sessionRenameOriginal)
+            {
+                s.CustomName = name.Length == 0 ? null : name;
+                if (s.CustomName is not null) s.Name = s.CustomName;
+            }
+        }
+        else if (name.Length > 0)
+        {
+            if (item is Workspace w) w.Name = name;
             else if (ReferenceEquals(item, WindowRenameMarker)) RenameThisWindow(name);   // File ▸ Rename Window…
         }
         DestroyEditWindow(h);
@@ -1350,8 +1363,11 @@ internal partial class Program
             float ry = py + queryH + i * rowH;
             if (idx == _palSel) { brush.Color = PalSel; rt.FillRectangle(new Rect(px + 4f, ry, pw - 8f, rowH), brush); }
             float tx = px + 16f;
-            if (it.Session is { } session && DrawSessionStatus(rt, brush, session, px + 16f, ry + rowH / 2f))
+            if (it.Session is { } session)
+            {
+                DrawSessionStatus(rt, brush, session, px + 16f, ry + rowH / 2f);
                 tx = px + 30f;
+            }
             bool hasSub = it.Secondary.Length > 0;
             brush.Color = it.Run is null || it.Enabled?.Invoke() == false ? ChromeDim : (idx == _palSel ? SbActiveText : ChromeText);
             float lw = pw - (tx - px) - (it.Hint.Length > 0 ? 80f : 20f);

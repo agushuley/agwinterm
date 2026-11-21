@@ -106,13 +106,13 @@ internal partial class Program
             // partial redraw never reaches the screen — the closing 2026l chunk clears the mode and
             // paints the frame atomically. The cursor-blink InvalidateRect still repaints within ~one
             // blink interval, so a crash that leaves ?2026 open can't freeze the pane for long.
+            if (session.Emulator.SynchronizedOutput) return;
             string? title = pane.ProgramTitle;
             string cwd = session.Emulator.Cwd;
             bool titleChanged = title != lastTitle || (title is null && cwd != lastCwd);
             lastTitle = title;
             lastCwd = cwd;
-            if ((!session.Emulator.SynchronizedOutput || titleChanged) &&
-                (IsSurfaceVisible(pane) || (titleChanged && _sidebarW > 0))) RequestRedraw();
+            if (IsSurfaceVisible(pane) || (titleChanged && _sidebarW > 0)) RequestRedraw();
         };
         // On a transition INTO blocked, play the configured blocked-sound (best-effort, off the UI thread).
         AgentStatus lastStatus = session.Status;
@@ -308,7 +308,7 @@ internal partial class Program
         public void Notify(string title, string body) => _app.Post(() => _app.OnNotified(_pane, title, body));
         public void Progress(int state, int value) => _app.Post(() =>
         {
-            var progress = (state, value);
+            (int State, int Percent) progress = state is >= 1 and <= 4 ? (state, value) : default;
             if (_pane.Progress != progress)
             {
                 _pane.Progress = progress;
@@ -510,8 +510,8 @@ internal partial class Program
         cwd = ResolveNewSessionCwd(ws, cwd, ResolveProfile(profileName));
         int ordinal;
         lock (_workspaces) ordinal = ws.Sessions.Count + 1;
-        if (name is null && handoff is { Title.Length: > 0 } ht) name = ht.Title;   // label handoff sessions with the app's title
-        var ses = new Ses { Id = id, Name = name ?? $"session {ordinal}", CustomName = string.IsNullOrWhiteSpace(name) ? null : name, Ws = ws,
+        var ses = new Ses { Id = id, Name = name ?? handoff?.Title ?? $"session {ordinal}",
+            CustomName = string.IsNullOrWhiteSpace(name) ? null : name, Ws = ws,
             ProfileName = profileName, Env = sessionEnv, Elevated = IsElevated() && !deElevate };
         // At most one pane carries the session id (control-API back-compat: a fresh session's pane 0 IS
         // the session id, so a session id addresses a pane). A swap may put that pane on either side,
@@ -1564,7 +1564,7 @@ internal partial class Program
         // SyncSession: the survivor's SURFACE — its own overlay if it holds one (P5) — under a cover if up.
         if (ReferenceEquals(ses, _active)) SyncSession();
         RegridSession(ses);
-        if (ReferenceEquals(ses, _active)) RequestRedraw();
+        RequestRedraw();
         SaveState();
         EmitEvent("tree");   // control-API event log (#273): the node lost its split block
     }

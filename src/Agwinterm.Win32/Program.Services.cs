@@ -244,11 +244,20 @@ internal partial class Program
         return basename.Length == 0 ? cwd : basename;
     }
 
+    private const int WindowCaptionTimer = 16;
+    private bool _windowCaptionPending;
     private string _windowCaption = AppName;
+
+    private void ScheduleWindowCaption()
+    {
+        if (_isQuickWindow || _windowCaptionPending) return;
+        // OSC titles can contain an animated spinner. Coalesce writes to the native caption.
+        _windowCaptionPending = SetTimer(_hwnd, (IntPtr)WindowCaptionTimer, 250, IntPtr.Zero) != IntPtr.Zero;
+        if (!_windowCaptionPending) SyncWindowCaption();
+    }
 
     private void SyncWindowCaption()
     {
-        if (_isQuickWindow) return;
         string caption = _active?.DisplayName ?? AppName;
         if (!string.IsNullOrEmpty(WinName)) caption += $" — {WinName}";
         if (caption != _windowCaption && SetWindowTextW(_hwnd, caption)) _windowCaption = caption;
@@ -1657,7 +1666,7 @@ internal partial class Program
                     {
                         Id = s.Id,
                         Name = s.Name,
-                        CustomName = s.CustomName,
+                        CustomName = s.CustomName ?? "",
                         Context = s.Context,   // P3: null = no key written (RestoreState explains why)
                         Profile = s.ProfileName,
                         Env = s.Env.Count == 0 ? null : s.Env,
@@ -1881,10 +1890,12 @@ internal partial class Program
                                 }
                             }
                     ses.Flagged = s.Flagged;
-                    // Older snapshots stored names supplied at creation only in Name.
+                    // Older snapshots left CustomName null for names supplied at creation.
+                    // An empty CustomName records an automatic name even with a saved alias.
                     bool autoName = ses.Name.StartsWith("session ", StringComparison.Ordinal) &&
                         int.TryParse(ses.Name.AsSpan("session ".Length), System.Globalization.NumberStyles.None, null, out _);
-                    ses.CustomName = !string.IsNullOrWhiteSpace(s.CustomName) ? s.CustomName : autoName ? null : ses.Name;
+                    ses.CustomName = s.CustomName is null && !autoName ? ses.Name :
+                        string.IsNullOrWhiteSpace(s.CustomName) ? null : s.CustomName;
                     ses.Context = RestoreState.LoadContext(s.Context); // validated, not trusted: an out-of-rules value is dropped, not shown
                     if (!string.IsNullOrEmpty(s.BgFile)) // restore the watermark if its copied file still exists
                     {

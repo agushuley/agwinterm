@@ -10,6 +10,7 @@ Workspace defaults and global environment variables can be edited in
 - **Workspaces → sessions → panes** in a custom-drawn sidebar: drag-reorder, rename, flag, focus,
   unread badges (green `ok`, yellow `normal`, red `attention` or untyped; colors can be changed in Settings → Notifications), **multi-select with Ctrl/Shift+click** for batch flag / move / close, and reopen
   closed sessions *and workspaces* with `Ctrl+Shift+R`. See [workspace navigation](navigation.md).
+  Clear a session name in the sidebar rename field to return to the title reported by the terminal.
 - **Dashboard** (`Ctrl+Shift+D`): a grid of **live** session previews — arrow-navigate, Enter or
   double-click to jump in; or drive it with `agwintermctl dashboard <ids>`.
 - **Agent status** uses a spinner while working, a star when the agent needs you, and a check
