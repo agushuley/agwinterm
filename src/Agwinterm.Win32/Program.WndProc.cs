@@ -168,6 +168,7 @@ internal partial class Program
                 }
 
             case WM_PAINT:
+                SyncWindowCaption();
                 BeginPaint(hwnd, out PAINTSTRUCT ps);
                 Render();
                 _lastPaintTick = Environment.TickCount64;
@@ -213,6 +214,13 @@ internal partial class Program
 
             case WM_TIMER:
                 if ((int)wParam == HudTimer) { HudTick(); return IntPtr.Zero; }
+                if ((int)wParam == StatusAnimationTimer)
+                {
+                    KillTimer(hwnd, wParam);
+                    _statusAnimationPending = false;
+                    InvalidateRect(hwnd, IntPtr.Zero, false);
+                    return IntPtr.Zero;
+                }
                 if ((int)wParam == 2) { _toastText = null; _toastTarget = null; KillTimer(hwnd, (IntPtr)2); InvalidateRect(hwnd, IntPtr.Zero, false); return IntPtr.Zero; }
                 if ((int)wParam == SelAutoTimer) { SelAutoscrollTick(); return IntPtr.Zero; }
                 if ((int)wParam == HoverTimer) { HoverTick(); return IntPtr.Zero; }

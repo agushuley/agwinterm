@@ -86,6 +86,8 @@ internal partial class Program
         lock (session.SyncRoot) session.Emulator.ScrollbackMax = _config.Scrollback;
         var pane = new Pane { Id = paneId, S = session, StartCwd = cwd, FontSize = fontSize,
             FontZoomed = fontSize != (float)_config.FontSize };
+        string? lastTitle = pane.ProgramTitle;
+        string lastCwd = session.Emulator.Cwd;
         // New output snaps this pane back to the live bottom when the buffer ACTUALLY scrolled (a line
         // pushed into history) — not on every repaint. TUIs like Claude Code redraw in place without
         // scrolling, so a mouse selection survives those frames. #copy-selection
@@ -95,10 +97,7 @@ internal partial class Program
         // gone, and Ctrl+C falls through to the interrupt — cancelling its turn. The selection is
         // reconciled in ReconcileSel instead, on the UI thread, against the snapshot taken when it was made.
         // This handler therefore writes NOTHING about the selection at all.
-        // Repaints are requested ONLY when this pane is on screen: a background tab's output flood
-        // used to repaint the (unchanged!) foreground at the full frame cap, starving typing on slow
-        // machines. The emulator still consumes everything; switching to the pane shows current
-        // content, and the sidebar title catches up on the next paint (cursor blink at the latest).
+        // Background output only needs a repaint when it changes the session label in the sidebar.
         session.OutputReceived += () =>
         {
             long gen = session.Emulator.ScrollGeneration;
@@ -107,7 +106,13 @@ internal partial class Program
             // partial redraw never reaches the screen — the closing 2026l chunk clears the mode and
             // paints the frame atomically. The cursor-blink InvalidateRect still repaints within ~one
             // blink interval, so a crash that leaves ?2026 open can't freeze the pane for long.
-            if (IsSurfaceVisible(pane) && !session.Emulator.SynchronizedOutput) RequestRedraw();
+            string? title = pane.ProgramTitle;
+            string cwd = session.Emulator.Cwd;
+            bool titleChanged = title != lastTitle || (title is null && cwd != lastCwd);
+            lastTitle = title;
+            lastCwd = cwd;
+            if ((!session.Emulator.SynchronizedOutput || titleChanged) &&
+                (IsSurfaceVisible(pane) || (titleChanged && _sidebarW > 0))) RequestRedraw();
         };
         // On a transition INTO blocked, play the configured blocked-sound (best-effort, off the UI thread).
         AgentStatus lastStatus = session.Status;
@@ -301,7 +306,16 @@ internal partial class Program
         private readonly Program _app; private readonly Pane _pane; private readonly ISession _s;
         public PaneHost(Program app, Pane pane, ISession s) { _app = app; _pane = pane; _s = s; }
         public void Notify(string title, string body) => _app.Post(() => _app.OnNotified(_pane, title, body));
-        public void Progress(int state, int value) => _app.Post(() => _app.OnProgress(state, value));   // OSC 9;4 -> taskbar
+        public void Progress(int state, int value) => _app.Post(() =>
+        {
+            var progress = (state, value);
+            if (_pane.Progress != progress)
+            {
+                _pane.Progress = progress;
+                _app.RequestRedraw();
+            }
+            _app.OnProgress(state, value);
+        });
         public void ClipboardWrite(string text)                                                        // OSC 52 -> system clipboard
         {
             // Policy at the seam (Ghostty's clipboard-write = allow|deny): the emulator emits the
@@ -497,7 +511,8 @@ internal partial class Program
         int ordinal;
         lock (_workspaces) ordinal = ws.Sessions.Count + 1;
         if (name is null && handoff is { Title.Length: > 0 } ht) name = ht.Title;   // label handoff sessions with the app's title
-        var ses = new Ses { Id = id, Name = name ?? $"session {ordinal}", Ws = ws, ProfileName = profileName, Env = sessionEnv, Elevated = IsElevated() && !deElevate };
+        var ses = new Ses { Id = id, Name = name ?? $"session {ordinal}", CustomName = string.IsNullOrWhiteSpace(name) ? null : name, Ws = ws,
+            ProfileName = profileName, Env = sessionEnv, Elevated = IsElevated() && !deElevate };
         // At most one pane carries the session id (control-API back-compat: a fresh session's pane 0 IS
         // the session id, so a session id addresses a pane). A swap may put that pane on either side,
         // closing it by any path leaves none (the id then resolves to the focused pane, like a name —
@@ -1580,7 +1595,7 @@ internal partial class Program
         RequestRedraw();
         EmitEvent("tree");
         if (!ReferenceEquals(pane, ActiveSurface()) || !_windowActive)
-            OnNotified(pane, "Session ended", $"{ses.Name} exited with code {exitCode}.",
+            OnNotified(pane, "Session ended", $"{ses.DisplayName} exited with code {exitCode}.",
                 exitCode == 0 ? NotificationCategory.Ok : NotificationCategory.Attention);
     }
 
@@ -1629,10 +1644,7 @@ internal partial class Program
         var p = ses.ActivePane;
         string live = PrettyCwd(SafeCwd(p));
         string cwd = live.Length > 0 ? live : (p.StartCwd ?? "");
-        string display = !string.IsNullOrEmpty(ses.CustomName) ? ses.CustomName!
-            : (!string.IsNullOrEmpty(cwd) ? Path.GetFileName(cwd.TrimEnd('\\', '/')) : ses.Name);
-        if (string.IsNullOrEmpty(display)) display = ses.Name;
-        return new ClosedSession(ses.CustomName, ses.ProfileName, cwd, ses.Ws.Id, ses.Ws.Name, ses.Flagged, display, ses.Name, ses.Id, ++_closeSeq, ses.Context, ses.Env);
+        return new ClosedSession(ses.CustomName, ses.ProfileName, cwd, ses.Ws.Id, ses.Ws.Name, ses.Flagged, ses.DisplayName, ses.Name, ses.Id, ++_closeSeq, ses.Context, ses.Env);
     }
 
     /// <summary>Remember a session's identity so it can be reopened after it's closed.</summary>
@@ -2129,7 +2141,8 @@ internal partial class Program
             var all = _workspaces.SelectMany(w => w.Sessions).ToList();
             var byId = all.FirstOrDefault(x => x.Id.StartsWith(target, StringComparison.Ordinal));
             if (byId is not null) return byId;
-            var named = all.Where(x => string.Equals(x.Name, target, StringComparison.OrdinalIgnoreCase)).ToList();
+            var named = all.Where(x => string.Equals(x.Name, target, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(x.DisplayName, target, StringComparison.OrdinalIgnoreCase)).ToList();
             return named.Count == 1 ? named[0] : null;
         }
     }

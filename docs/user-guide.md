@@ -12,8 +12,9 @@ Workspace defaults and global environment variables can be edited in
   closed sessions *and workspaces* with `Ctrl+Shift+R`. See [workspace navigation](navigation.md).
 - **Dashboard** (`Ctrl+Shift+D`): a grid of **live** session previews — arrow-navigate, Enter or
   double-click to jump in; or drive it with `agwintermctl dashboard <ids>`.
-- **Agent status** per session (idle / active / blocked / completed) as a colored dot and a title-bar
-  bell, driven by your agent via hooks or the control API, with blink, auto-reset, and sounds. Run
+- **Agent status** uses a spinner while working, a star when the agent needs you, and a check
+  when it finishes. When a program reports a percentage through OSC 9;4, a circle fills to that
+  percentage. Agent hooks and the control API also drive the title-bar bell, blink, auto-reset, and sounds. Run
   `agwintermctl install hooks` (or the palette entry) once to wire Claude Code / Codex / Devin up.
   When an existing Devin JSONC config needs changes, the installer keeps its exact original in a
   numbered `.agwinterm.bak` sibling, then rewrites the active config as JSON without comments or

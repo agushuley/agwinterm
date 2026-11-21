@@ -98,18 +98,11 @@ internal partial class Program
             rt.FillRectangle(new Rect(cx, cy, cellW, labelH), brush);
             // Agent-status glyph at the strip's right edge (agterm #209) — a session needing
             // attention stands out in the grid. Idle draws nothing.
-            var st = AggStatus(s);
             float titleRight = cellW - 12f;
-            if (st != AgentStatus.Idle)
-            {
-                var dot = StatusDot(st);
-                if (AggBlink(s) && !_cursorOn) dot = new Color4(dot.R, dot.G, dot.B, 0.30f); // pulse with the cursor clock
-                brush.Color = dot;
-                rt.FillEllipse(new Ellipse(new System.Numerics.Vector2(cx + cellW - 12f, cy + labelH / 2f), 4.5f, 4.5f), brush);
+            if (DrawSessionStatus(rt, brush, s, cx + cellW - 12f, cy + labelH / 2f))
                 titleRight -= 14f;
-            }
             brush.Color = sel ? new Color4(1f, 1f, 1f, 1f) : ChromeText;
-            rt.DrawText($"{s.Ws.Name} / {s.Name}", _uiSmall, new Rect(cx + 6f, cy + 1f, titleRight, labelH - 1f), brush, DrawTextOptions.Clip);
+            rt.DrawText($"{s.Ws.Name} / {s.DisplayName}", _uiSmall, new Rect(cx + 6f, cy + 1f, titleRight, labelH - 1f), brush, DrawTextOptions.Clip);
 
             // Live terminal preview, clipped to the cell body
             float tx = cx + 4f, ty = cy + labelH + 2f, tw = MathF.Max(1f, cellW - 8f), th = MathF.Max(1f, cellH - labelH - 6f);

@@ -73,7 +73,7 @@ public static class SessionHuds
 
     public static string Reply(string session, HudSpec? hud) => JsonSerializer.Serialize(new { session, hud }, JsonOptions);
 
-    public sealed record Target(string Id, string Name, IEnumerable<string> SurfaceIds);
+    public sealed record Target(string Id, string Name, IEnumerable<string> SurfaceIds, string? NameAlias = null);
 
     /// <summary>HUD-only session routing, shared with the contract fake. Exact session IDs win;
     /// other surface IDs never widen, and a prefix must identify one owning session's own ID.</summary>
@@ -89,7 +89,8 @@ public static class SessionHuds
         if (standalone.Any(id => id.StartsWith(target, StringComparison.Ordinal))) return null;
         if (prefixes.Length != 0)
             return prefixes.Length == 1 && prefixes[0].Id.StartsWith(target, StringComparison.Ordinal) ? prefixes[0].Id : null;
-        var named = sessions.Where(s => string.Equals(s.Name, target, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var named = sessions.Where(s => string.Equals(s.Name, target, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s.NameAlias, target, StringComparison.OrdinalIgnoreCase)).ToArray();
         return named.Length == 1 ? named[0].Id : null;
     }
     public readonly record struct Box(float X, float Y, float Width, float Height);

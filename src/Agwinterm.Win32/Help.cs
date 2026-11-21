@@ -70,7 +70,7 @@ internal partial class Program
         {
             Section("GETTING STARTED"),
             Line("agwinterm is an agent-first terminal: sessions live in the left sidebar,"),
-            Line("each with a status dot an agent can set via the control API (agwintermctl)."),
+            Line("each with an agent status icon set via the control API (agwintermctl)."),
             Blank,
             Section("FOCUS & NAVIGATION"),
             Bind("F6", "move focus between terminal and sidebar (arrows + Enter there)"),

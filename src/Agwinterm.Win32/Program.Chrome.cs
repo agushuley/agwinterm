@@ -28,13 +28,82 @@ internal partial class Program
     private Color4 SbDimText = new(0.60f, 0.63f, 0.67f, 1f);
 
     // Status-glyph colors are user-configurable (Agent Status settings tab); defaults match the originals.
-    private Color4 StatusDot(AgentStatus s) => s switch
+    private Color4 StatusColor(AgentStatus s) => s switch
     {
         AgentStatus.Active => HexColor4(_config.StatusColorActive, new(60 / 255f, 140 / 255f, 255 / 255f, 1f)),
         AgentStatus.Blocked => HexColor4(_config.StatusColorBlocked, new(240 / 255f, 160 / 255f, 40 / 255f, 1f)),
         AgentStatus.Completed => HexColor4(_config.StatusColorCompleted, new(60 / 255f, 200 / 255f, 90 / 255f, 1f)),
         _ => new(90 / 255f, 96 / 255f, 102 / 255f, 1f),
     };
+
+    private const int StatusAnimationTimer = 15;
+    private const int StatusFrameMs = 100;
+    private bool _statusAnimationPending;
+
+    private bool DrawSessionStatus(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, Ses session, float x, float y)
+    {
+        var status = AggStatus(session);
+        var pane = session.ActivePane;
+        var (state, percent) = pane.S.HasExited ? default : pane.Progress;
+        var center = new System.Numerics.Vector2(x, y);
+        var color = StatusColor(status == AgentStatus.Idle ? AgentStatus.Active : status);
+        if (AggBlink(session) && !_cursorOn) color = WithA(color, 0.3f);
+        brush.Color = color;
+
+        if (status == AgentStatus.Blocked)
+        {
+            rt.DrawLine(center - new System.Numerics.Vector2(5f, 0f), center + new System.Numerics.Vector2(5f, 0f), brush, 1.4f);
+            rt.DrawLine(center - new System.Numerics.Vector2(0f, 5f), center + new System.Numerics.Vector2(0f, 5f), brush, 1.4f);
+            rt.DrawLine(center - new System.Numerics.Vector2(3.5f, 3.5f), center + new System.Numerics.Vector2(3.5f, 3.5f), brush, 1.4f);
+            rt.DrawLine(center - new System.Numerics.Vector2(3.5f, -3.5f), center + new System.Numerics.Vector2(3.5f, -3.5f), brush, 1.4f);
+        }
+        else if (state is 1 or 2 or 4)
+        {
+            const float radius = 4.8f;
+            var ring = new Ellipse(center, radius, radius);
+            rt.DrawEllipse(ring, brush, 1f);
+            if (percent >= 100) rt.FillEllipse(ring, brush);
+            else if (percent > 0)
+            {
+                float angle = percent * MathF.Tau / 100f;
+                using var sector = _d2d.CreatePathGeometry();
+                using var sink = sector.Open();
+                sink.BeginFigure(center, FigureBegin.Filled);
+                sink.AddLine(new System.Numerics.Vector2(x, y - radius));
+                sink.AddArc(new ArcSegment
+                {
+                    Point = new System.Numerics.Vector2(x + radius * MathF.Sin(angle), y - radius * MathF.Cos(angle)),
+                    Size = new Size(radius, radius),
+                    SweepDirection = SweepDirection.Clockwise,
+                    ArcSize = percent > 50 ? ArcSize.Large : ArcSize.Small,
+                });
+                sink.EndFigure(FigureEnd.Closed);
+                sink.Close();
+                rt.FillGeometry(sector, brush);
+            }
+        }
+        else if (status == AgentStatus.Active || state == 3)
+        {
+            if (!_statusAnimationPending)
+                _statusAnimationPending = SetTimer(_hwnd, (IntPtr)StatusAnimationTimer, StatusFrameMs, IntPtr.Zero) != IntPtr.Zero;
+            int frame = (int)(Environment.TickCount64 / StatusFrameMs % 8);
+            for (int i = 0; i < 8; i++)
+            {
+                float angle = i * MathF.Tau / 8f;
+                var direction = new System.Numerics.Vector2(MathF.Cos(angle), MathF.Sin(angle));
+                brush.Color = WithA(color, color.A * (1f - ((frame - i + 8) % 8) * 0.11f));
+                rt.DrawLine(center + direction * 2.8f, center + direction * 5.2f, brush, 1.3f);
+            }
+        }
+        else if (status == AgentStatus.Completed)
+        {
+            var bend = new System.Numerics.Vector2(x - 1.2f, y + 3.4f);
+            rt.DrawLine(new System.Numerics.Vector2(x - 4.7f, y), bend, brush, 1.5f);
+            rt.DrawLine(bend, new System.Numerics.Vector2(x + 4.7f, y - 3.4f), brush, 1.5f);
+        }
+        else return false;
+        return true;
+    }
 
     /// <summary>Parse "#RRGGBB" (or "#RGB") to a Color4; returns <paramref name="fallback"/> on any failure.</summary>
     private static Color4 HexColor4(string hex, Color4 fallback)
@@ -196,9 +265,10 @@ internal partial class Program
             float nameRight = _sidebarW - 22f;
             if (badgeText is not null) nameRight = MathF.Min(nameRight, badgeX - 5f);
             float nameAvail = MathF.Max(0f, nameRight - nameX);
-            // Clip + ellipsis-trim so a long name (or an enlarged sidebar font) never spills over the dot.
-            rt.DrawText(s.Name, _sidebarFont, new Rect(nameX, y, nameAvail, rowH), brush, DrawTextOptions.Clip);
-            RecordSidebarName(s, s.Name, nameX, y, nameAvail, rowH);
+            // Keep long names clear of the status glyph.
+            string name = s.DisplayName;
+            rt.DrawText(name, _sidebarFont, new Rect(nameX, y, nameAvail, rowH), brush, DrawTextOptions.Clip);
+            RecordSidebarName(s, name, nameX, y, nameAvail, rowH);
             // session.context (P3): a dimmer, smaller suffix after the name in the SAME row, clipped to
             // the name rect. The name keeps its full width and the context takes what is left; it is
             // never a second line and never changes rowH — DrawSidebar computes ONE rowH per paint and
@@ -206,7 +276,7 @@ internal partial class Program
             // The palette's Secondary line is where the long form lives.
             if (s.Context is string ctx && ctx.Length > 0)
             {
-                float nameW = MathF.Min(MeasureText(s.Name, _sidebarFont), nameAvail);
+                float nameW = MathF.Min(MeasureText(name, _sidebarFont), nameAvail);
                 float ctxX = nameX + nameW + 6f, ctxW = nameAvail - nameW - 6f;
                 if (ctxW >= 16f)
                 {
@@ -215,7 +285,7 @@ internal partial class Program
                 }
             }
         }
-        // Unread-notification count badge, just left of the status circle (can be hidden; the count still tracks).
+        // Unread-notification count badge, just left of the status glyph.
         if (badgeText is not null)
         {
             var notificationCategory = UnreadCategoryOf(s);
@@ -234,11 +304,7 @@ internal partial class Program
             if (exitCode is int code)
                 _sidebarNames.Add(new SidebarNameHit(s, $"{unread} unread; session ended (exit {code})", badgeX, y, badgeWidth, rowH));
         }
-        // Pane-aware: the status circle shows the most attention-worthy state across ALL panes.
-        var dot = StatusDot(AggStatus(s));
-        if (AggBlink(s) && !_cursorOn) dot = new Color4(dot.R, dot.G, dot.B, 0.22f);
-        brush.Color = dot;
-        rt.FillEllipse(new Ellipse(new System.Numerics.Vector2(_sidebarW - 16f, y + rowH / 2f), 4.5f, 4.5f), brush);
+        DrawSessionStatus(rt, brush, s, _sidebarW - 16f, y + rowH / 2f);
         _sidebarRows.Add((y, y + rowH, false, s));
     }
 
@@ -362,7 +428,7 @@ internal partial class Program
         float ry0 = -1, ry1 = -1;
         foreach (var (y0, y1, _, it) in _sidebarRows) if (ReferenceEquals(it, item)) { ry0 = y0; ry1 = y1; break; }
         if (ry0 < 0) { RequestRedraw(); return; } // row not currently visible
-        string name = item is Ses s ? s.Name : ((Workspace)item).Name;
+        string name = item is Ses s ? s.DisplayName : ((Workspace)item).Name;
         EnsureEditGdi();
         // Fill the whole row (matches the highlight band); a left text-margin puts the text exactly
         // where the row name is drawn, so nothing shifts when editing starts.
@@ -619,7 +685,7 @@ internal partial class Program
             brush.Color = new Color4(0.30f, 0.60f, 0.98f, 1f);
             rt.FillRectangle(new Rect(0, lineY - 1f, _sidebarW, 2f), brush);
         }
-        string label = _dragItem is Ses s ? s.Name : _dragItem is Workspace w ? w.Name : "";
+        string label = _dragItem is Ses s ? s.DisplayName : _dragItem is Workspace w ? w.Name : "";
         if (label.Length > 0)
         {
             brush.Color = new Color4(1f, 1f, 1f, 0.92f);
@@ -865,10 +931,10 @@ internal partial class Program
                         if (ctx.Length > 0) secondary = $"{ctx}  ·  {secondary}";
                         _palAll.Add(new PalItem
                         {
-                            Label = sx.Name,
+                            Label = sx.DisplayName,
                             Secondary = secondary,
-                            Search = ctx.Length > 0 ? $"{sx.Name} {ctx} {sx.Ws.Name} {cwd}" : $"{sx.Name} {sx.Ws.Name} {cwd}",
-                            Dot = AggStatus(sx),
+                            Search = $"{sx.DisplayName} {ctx} {sx.Ws.Name} {cwd}",
+                            Session = sx,
                             Run = () => { lock (_workspaces) sx.Ws.Expanded = true; SetActive(sx); },
                         });
                     }
@@ -1147,10 +1213,10 @@ internal partial class Program
                         var sx = s;
                         _palAll.Add(new PalItem
                         {
-                            Label = sx.Name,
+                            Label = sx.DisplayName,
                             Secondary = $"{sx.Ws.Name}  ·  {AggStatus(sx).ToString().ToLowerInvariant()}",
-                            Search = $"{sx.Name} {sx.Ws.Name}",
-                            Dot = AggStatus(sx),
+                            Search = $"{sx.DisplayName} {sx.Ws.Name}",
+                            Session = sx,
                             Run = () => { lock (_workspaces) sx.Ws.Expanded = true; SetActive(sx); },
                         });
                     }
@@ -1284,7 +1350,8 @@ internal partial class Program
             float ry = py + queryH + i * rowH;
             if (idx == _palSel) { brush.Color = PalSel; rt.FillRectangle(new Rect(px + 4f, ry, pw - 8f, rowH), brush); }
             float tx = px + 16f;
-            if (it.Dot is AgentStatus ds) { brush.Color = StatusDot(ds); rt.FillEllipse(new Ellipse(new System.Numerics.Vector2(px + 16f, ry + rowH / 2f), 4.5f, 4.5f), brush); tx = px + 30f; }
+            if (it.Session is { } session && DrawSessionStatus(rt, brush, session, px + 16f, ry + rowH / 2f))
+                tx = px + 30f;
             bool hasSub = it.Secondary.Length > 0;
             brush.Color = it.Run is null || it.Enabled?.Invoke() == false ? ChromeDim : (idx == _palSel ? SbActiveText : ChromeText);
             float lw = pw - (tx - px) - (it.Hint.Length > 0 ? 80f : 20f);
@@ -1673,9 +1740,8 @@ internal partial class Program
             var sx = s;
             items.Add(new PalItem
             {
-                Label = sx.Name,
+                Label = sx.DisplayName,
                 Secondary = $"{sx.Ws.Name}  ·  {AggStatus(sx).ToString().ToLowerInvariant()}",
-                Dot = AggStatus(sx),
                 Run = () => { lock (_workspaces) sx.Ws.Expanded = true; SetActive(sx); },
             });
         }
@@ -1694,12 +1760,10 @@ internal partial class Program
         foreach (var s in recent)
         {
             var sx = s;
-            var st = AggStatus(sx);
             items.Add(new PalItem
             {
-                Label = ReferenceEquals(sx, _active) ? sx.Name + "  (current)" : sx.Name,
+                Label = sx.DisplayName + (ReferenceEquals(sx, _active) ? "  (current)" : ""),
                 Secondary = sx.Ws.Name,
-                Dot = st == AgentStatus.Idle ? null : st,
                 Run = () => { lock (_workspaces) sx.Ws.Expanded = true; SetActive(sx); },
             });
         }

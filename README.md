@@ -19,7 +19,7 @@ What it does:
 - **Workspaces and sessions.** Sessions are grouped under named workspaces in a sidebar with drag-reorder, flags, unread badges, multi-select, and reopen for closed sessions and workspaces. A live **dashboard** shows a grid of sessions at once.
 - **Control API and CLI.** `agwintermctl` drives almost everything over a named pipe, with full read-back: the tree with split ratios and pane ids, window state, session output, a pane's caret column, the age of a status.
 - **Splits, scratch, quick terminal and overlays.** Split a session side by side or stacked, open a scratch or a detached quick terminal, run a program in an overlay over a session or over one pane of it, or show a passive HUD.
-- **Agent status and skill.** Agents report their state through hooks or the API as a colored dot and a title-bar bell. Opt-in installers add the agent skill, Claude Code / Codex / Devin status hooks, shell integration and the CLI on `PATH`.
+- **Agent status and skill.** Agents report their state through hooks or the API. Session icons show work, progress, and attention, alongside a title-bar bell. Opt-in installers add the agent skill, Claude Code / Codex / Devin status hooks, shell integration and the CLI on `PATH`.
 - **Claude Code binding and auto-resume.** A `claude` wrapper ties each conversation to its pane, so a restart re-launches every bound pane and the conversation comes back. Updating Claude Code restarts every running Claude session into its own conversation.
 - **Restore, and shells that survive the UI.** Sessions come back with their layout and pinned commands, and with captured commands when `restore-commands` is on. The experimental pty-host server mode keeps every shell running through a UI quit, update or crash.
 - **A real Windows terminal.** Default Terminal Application registration, ~33k lines/s output, Sixel and Kitty graphics, the Kitty keyboard protocol, ligatures, elevated and de-elevated sessions side by side, and agterm's menus — File, View, Navigate, Help — as a menu bar in the title bar (Alt or F10).
@@ -91,7 +91,7 @@ $sid = agwintermctl session new --workspace-name demo --create-workspace --cwd $
 agwintermctl session split on --axis horizontal --target $sid           # add a stacked shell; answers its pane id
 agwintermctl session type "git status`n" --target $sid                  # drive a session you are not looking at
 agwintermctl session text --target $sid --lines 10                      # read its terminal back
-agwintermctl session status blocked --target $sid                       # set the sidebar status dot
+agwintermctl session status blocked --target $sid                       # show the attention icon
 agwintermctl session overlay open "lazygit" --block                     # run a program over the session, get its exit
 agwintermctl tree --json                                                # dump the whole model as JSON
 ```

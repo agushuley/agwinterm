@@ -229,7 +229,7 @@ internal partial class Program : ISessionHost, IWindowHost
         public string Secondary = "";
         public string Search = "";
         public string Hint = "";
-        public AgentStatus? Dot;      // leading status dot (attention/sessions)
+        public Ses? Session;          // live status glyph in session lists
         public object? Data;          // e.g. the Theme for live-preview
         public Action? Run;           // null = non-actionable placeholder
         public Func<bool>? Enabled;   // asked when the row is shown and again when it is run; false = dim and inert (menu + palette)
@@ -317,6 +317,8 @@ internal partial class Program : ISessionHost, IWindowHost
         public required string Id;
         public required ISession S;
         public string? StartCwd;   // dir the shell was launched in (fallback cwd when OSC 7 is absent)
+        public string? ProgramTitle => ReadProgramTitle(S.Emulator.Title);
+        public (int State, int Percent) Progress;
         public string? AgentResume; // resumable agent bound to this pane (e.g. "claude") — relaunched on restart
         // Bumped by every bind request; a SessionStart binding resolved in the background lands only if
         // no later bind arrived meanwhile, so startup-then-/clear cannot leave the older id bound (#316).
@@ -391,7 +393,8 @@ internal partial class Program : ISessionHost, IWindowHost
         public string Axis = SplitAxes.Vertical;
         public bool Flagged;       // durable working-set flag (survives moves; persisted; drives flagged sidebar mode)
         public bool Elevated;      // shell runs at High integrity (admin) — shown with a ⚡; false for de-elevated sessions
-        public string? CustomName; // user-renamed title (null = show the cwd/OSC title in the title bar, agterm-style)
+        public string? CustomName; // explicit session name (null = follow the focused pane's program title)
+        public string DisplayName => CustomName ?? PaneDisplayName(ActivePane);
         public string? Context;    // session.context: one line of "what is this pane for", set over the API (P3); drawn dimmed beside the name; persisted; null = none. Per session, not per pane — SessionContexts holds the rules.
         public string? ProfileName; // shell profile this session launched with (null = default; persisted)
         public IReadOnlyDictionary<string, string> Env = EnvironmentOverrides.Empty;
@@ -902,7 +905,7 @@ internal partial class Program : ISessionHost, IWindowHost
         _sidebarFont = NewChromeFormat("Segoe UI", px, center: false);
         _sidebarSmall = NewChromeFormat("Segoe UI", System.Math.Max(9f, px - 1.5f), center: false);
         // Trim over-long names with a "…" (esp. once the font is enlarged) so they never spill over the
-        // right-aligned status dot. Paired with DrawTextOptions.Clip at the draw sites.
+        // right-aligned status glyph. Paired with DrawTextOptions.Clip at the draw sites.
         _sidebarEllipsis = _dwrite.CreateEllipsisTrimmingSign(_sidebarFont);
         _sidebarFont.SetTrimming(new Trimming { Granularity = TrimmingGranularity.Character }, _sidebarEllipsis);
         // The context suffix gets the same treatment on its own format: a hard clip mid-glyph against
@@ -1040,7 +1043,7 @@ internal partial class Program : ISessionHost, IWindowHost
                 Kind = Uia.NodeKind.Session,
                 Index = s.UiaIdentity,
                 Name = s.Panes.Count == 1 && s.ActivePane.SessionExitCode is int exitCode
-                    ? $"{s.Name}, session ended (exit {exitCode})" : s.Name,
+                    ? $"{s.DisplayName}, session ended (exit {exitCode})" : s.DisplayName,
                 Parent = list,
                 Focused = _chromeFocus && ReferenceEquals(_focusRow, s),
                 Selected = ReferenceEquals(_active, s),
@@ -1240,12 +1243,13 @@ internal partial class Program : ISessionHost, IWindowHost
     private void AnnounceFocusRow()
     {
         if (_focusRow is null) return;
-        ShowToast(_focusRow.Name);   // a visible hint alongside the spoken one
+        string name = _focusRow.DisplayName;
+        ShowToast(name);   // a visible hint alongside the spoken one
         RaiseUiaFocusForRow();       // move UIA focus to this element (Narrator announces it)
         bool current = ReferenceEquals(_focusRow, _active);
         int unread = UnreadOf(_focusRow);
         string extra = (current ? ", current" : "") + (unread > 0 ? $", {unread} unread" : "");
-        _uia.Announce($"{_focusRow.Name}, session{extra}");
+        _uia.Announce($"{name}, session{extra}");
     }
 
     /// <summary>Keyboard handling while the sidebar zone has focus (F6). Up/Down walk sessions, Enter/Space

@@ -21,7 +21,7 @@ public static class AgentSkill
         # agwinterm
 
         agwinterm is a Windows terminal built for AI coding agents. When you run inside it you can
-        control it: report your status (a colored dot per session in the sidebar), manage sessions,
+        control it: report your status (an icon per session in the sidebar), manage sessions,
         type into sessions, and show images — via the `agwintermctl` CLI (preferred) or by writing
         one newline-delimited JSON request to its control pipe.
 
@@ -47,7 +47,7 @@ public static class AgentSkill
 
         Flags (any status): `--sound [name]` plays a cue (default alert, a system-sound name
         `beep|asterisk|exclamation|hand|question`, a Windows sound-event alias, or a `.wav` path);
-        `--blink` pulses the sidebar dot + title-bar bell until cleared; `--auto-reset` clears the
+        `--blink` pulses the sidebar icon and title-bar bell until cleared; `--auto-reset` clears the
         status back to idle the moment the user selects the session. Example, when you need attention:
         `agwintermctl session status blocked --sound --blink`.
         (A default blocked cue can also be set once via `blocked-sound =` in the config.)
@@ -106,6 +106,8 @@ public static class AgentSkill
           session it landed on and the name IN EFFECT, so you can see which one took it; read it back in
           `tree --json` as `name`. A blank name is refused, and so is a target that belongs to no session
           (the quick terminal).
+          In an unnamed session, the focused pane's terminal title (OSC 0 or 2) is the live name.
+          Use the session ID for stable targeting across title changes.
         - `agwintermctl session context <text> [--target ID]` — ONE LINE of "what is this pane for", shown dimmed after the
           name in the title bar and the sidebar row and on the palette's second line, where the name has to stay short.
           It survives a restart (and `session reopen`), and `tree --json` reads it back as `context` on the session node
