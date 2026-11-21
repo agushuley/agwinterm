@@ -21,7 +21,7 @@ public static class AgentSkill
         # agwinterm
 
         agwinterm is a Windows terminal built for AI coding agents. When you run inside it you can
-        control it: report your status (an icon per session in the sidebar), manage sessions,
+        control it: report your status (a colored dot per session in the sidebar), manage sessions,
         type into sessions, and show images — via the `agwintermctl` CLI (preferred) or by writing
         one newline-delimited JSON request to its control pipe.
 
@@ -47,7 +47,7 @@ public static class AgentSkill
 
         Flags (any status): `--sound [name]` plays a cue (default alert, a system-sound name
         `beep|asterisk|exclamation|hand|question`, a Windows sound-event alias, or a `.wav` path);
-        `--blink` pulses the sidebar icon and title-bar bell until cleared; `--auto-reset` clears the
+        `--blink` pulses the sidebar dot and title-bar bell until cleared; `--auto-reset` clears the
         status back to idle the moment the user selects the session. Example, when you need attention:
         `agwintermctl session status blocked --sound --blink`.
         (A default blocked cue can also be set once via `blocked-sound =` in the config.)

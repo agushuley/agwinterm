@@ -221,13 +221,6 @@ internal partial class Program
                     SyncWindowCaption();
                     return IntPtr.Zero;
                 }
-                if ((int)wParam == StatusAnimationTimer)
-                {
-                    KillTimer(hwnd, wParam);
-                    _statusAnimationPending = false;
-                    InvalidateRect(hwnd, IntPtr.Zero, false);
-                    return IntPtr.Zero;
-                }
                 if ((int)wParam == 2) { _toastText = null; _toastTarget = null; KillTimer(hwnd, (IntPtr)2); InvalidateRect(hwnd, IntPtr.Zero, false); return IntPtr.Zero; }
                 if ((int)wParam == SelAutoTimer) { SelAutoscrollTick(); return IntPtr.Zero; }
                 if ((int)wParam == HoverTimer) { HoverTick(); return IntPtr.Zero; }

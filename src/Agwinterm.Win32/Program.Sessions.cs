@@ -306,16 +306,7 @@ internal partial class Program
         private readonly Program _app; private readonly Pane _pane; private readonly ISession _s;
         public PaneHost(Program app, Pane pane, ISession s) { _app = app; _pane = pane; _s = s; }
         public void Notify(string title, string body) => _app.Post(() => _app.OnNotified(_pane, title, body));
-        public void Progress(int state, int value) => _app.Post(() =>
-        {
-            (int State, int Percent) progress = state is >= 1 and <= 4 ? (state, value) : default;
-            if (_pane.Progress != progress)
-            {
-                _pane.Progress = progress;
-                _app.RequestRedraw();
-            }
-            _app.OnProgress(state, value);
-        });
+        public void Progress(int state, int value) => _app.Post(() => _app.OnProgress(state, value));   // OSC 9;4 -> taskbar
         public void ClipboardWrite(string text)                                                        // OSC 52 -> system clipboard
         {
             // Policy at the seam (Ghostty's clipboard-write = allow|deny): the emulator emits the

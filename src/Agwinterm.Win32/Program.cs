@@ -229,7 +229,7 @@ internal partial class Program : ISessionHost, IWindowHost
         public string Secondary = "";
         public string Search = "";
         public string Hint = "";
-        public Ses? Session;          // live status glyph in session lists
+        public Ses? Session;          // live agent status in session lists
         public object? Data;          // e.g. the Theme for live-preview
         public Action? Run;           // null = non-actionable placeholder
         public Func<bool>? Enabled;   // asked when the row is shown and again when it is run; false = dim and inert (menu + palette)
@@ -318,7 +318,6 @@ internal partial class Program : ISessionHost, IWindowHost
         public required ISession S;
         public string? StartCwd;   // dir the shell was launched in (fallback cwd when OSC 7 is absent)
         public string? ProgramTitle => ReadProgramTitle(S.Emulator.Title);
-        public (int State, int Percent) Progress;
         public string? AgentResume; // resumable agent bound to this pane (e.g. "claude") — relaunched on restart
         // Bumped by every bind request; a SessionStart binding resolved in the background lands only if
         // no later bind arrived meanwhile, so startup-then-/clear cannot leave the older id bound (#316).

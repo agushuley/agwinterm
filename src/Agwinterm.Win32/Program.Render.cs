@@ -709,7 +709,7 @@ internal partial class Program
             var s = _mruSnapshot[i];
             float ry = py + headH + i * rowH;
             if (i == _mruIdx) { brush.Color = PalSel; rt.FillRectangle(new Rect(px + 4f, ry, pw - 8f, rowH), brush); }
-            DrawSessionStatus(rt, brush, s, px + 18f, ry + rowH / 2f);
+            DrawAgentStatusDot(rt, brush, s, px + 18f, ry + rowH / 2f);
             brush.Color = i == _mruIdx ? SbActiveText : ChromeText;
             rt.DrawText(s.DisplayName, _uiFont, new Rect(px + 32f, ry + (rowH - 20f) / 2f, pw - 150f, 20f), brush);
             brush.Color = ChromeDim;

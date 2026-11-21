@@ -229,8 +229,9 @@ internal partial class Program
     private static string? ReadProgramTitle(string title)
     {
         // ConPTY also reports the default console title, commonly an executable or absolute path.
-        if (string.IsNullOrWhiteSpace(title) || title.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            || (title.Length >= 2 && title[1] == ':' && title.Contains('\\'))) return null;
+        if (string.IsNullOrWhiteSpace(title) ||
+            (title.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && !title.Contains(' ')) ||
+            (title.Length >= 2 && title[1] == ':' && title.Contains('\\'))) return null;
         return title;
     }
 

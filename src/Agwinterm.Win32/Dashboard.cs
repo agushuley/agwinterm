@@ -99,7 +99,7 @@ internal partial class Program
             // Agent-status glyph at the strip's right edge (agterm #209) — a session needing
             // attention stands out in the grid. Idle draws nothing.
             float titleRight = cellW - 12f;
-            if (DrawSessionStatus(rt, brush, s, cx + cellW - 12f, cy + labelH / 2f))
+            if (DrawAgentStatusDot(rt, brush, s, cx + cellW - 12f, cy + labelH / 2f))
                 titleRight -= 14f;
             brush.Color = sel ? new Color4(1f, 1f, 1f, 1f) : ChromeText;
             rt.DrawText($"{s.Ws.Name} / {s.DisplayName}", _uiSmall, new Rect(cx + 6f, cy + 1f, titleRight, labelH - 1f), brush, DrawTextOptions.Clip);

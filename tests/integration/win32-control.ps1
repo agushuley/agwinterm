@@ -1404,8 +1404,9 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
             ((-not $badOp.ok) -and ([string]$badOp.error).Contains('sideways')) "reply=$($badOp | ConvertTo-Json -Compress)"
         Invoke-Ctl @('sidebar', 'width', '220') | Out-Null
 
-        $oscTitle = 'Agent task ' + $testToken.Substring(0, 8)
-        $oscSession = Invoke-Ctl @('session', 'new', '--command', "[Console]::Title = '$oscTitle'", '--no-select')
+        $oscTopic = 'Review agent-' + $testToken.Substring(0, 8) + '.exe'
+        $oscTitle = "$([char]0x2733) $oscTopic"
+        $oscSession = Invoke-Ctl @('session', 'new', '--command', "[Console]::Title = [string][char]0x2733 + ' $oscTopic'", '--no-select')
         if ($oscSession.ok) {
             $oscId = [string]$oscSession.result
             try {
@@ -1414,7 +1415,18 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
                     if ($oscNode.name -eq $oscTitle) { break }
                     Start-Sleep -Milliseconds 200
                 }
-                Check 'a background program title becomes its session name' ($oscNode.name -eq $oscTitle -and -not $oscNode.active) "name=$($oscNode.name)"
+                Check 'a background session displays the star supplied by the program title' ($oscNode.name -eq $oscTitle -and -not $oscNode.active) "name=$($oscNode.name)"
+                foreach ($prefix in 0x25D0, 0x2819) {
+                    $oscTitle = "$([char]$prefix) $oscTopic"
+                    $titleCommand = "[Console]::Title = [string][char]$prefix + ' $oscTopic'"
+                    $update = Invoke-Ctl @('session', 'type', "$titleCommand`r", '--target', $oscId)
+                    for ($i = 0; $i -lt 30; $i++) {
+                        $oscNode = Get-SessionSnapshot $oscId
+                        if ($oscNode.name -eq $oscTitle) { break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                    Check "the background session follows title prefix U+$($prefix.ToString('X4'))" ($update.ok -and $oscNode.name -eq $oscTitle -and -not $oscNode.active) "name=$($oscNode.name)"
+                }
                 Invoke-Ctl @('session', 'select', $oscId) | Out-Null
                 for ($i = 0; $i -lt 20; $i++) {
                     $process.Refresh()

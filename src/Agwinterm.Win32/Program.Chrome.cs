@@ -36,74 +36,13 @@ internal partial class Program
         _ => new(90 / 255f, 96 / 255f, 102 / 255f, 1f),
     };
 
-    private const int StatusAnimationTimer = 15;
-    private const int StatusFrameMs = 100;
-    private bool _statusAnimationPending;
-
-    private bool DrawSessionStatus(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, Ses session, float x, float y)
+    private bool DrawAgentStatusDot(ID2D1HwndRenderTarget rt, ID2D1SolidColorBrush brush, Ses session, float x, float y)
     {
         var status = AggStatus(session);
-        var pane = session.ActivePane;
-        if (pane.S.HasExited || pane.Progress.State == 0)
-            pane = session.Panes.FirstOrDefault(p => !p.S.HasExited && p.Progress.State != 0) ?? pane;
-        var (state, percent) = pane.S.HasExited ? default : pane.Progress;
-        var center = new System.Numerics.Vector2(x, y);
-        var color = StatusColor(status == AgentStatus.Idle ? AgentStatus.Active : status);
-        if (AggBlink(session) && !_cursorOn) color = WithA(color, 0.3f);
-        brush.Color = color;
-
-        if (status == AgentStatus.Blocked)
-        {
-            rt.DrawLine(center - new System.Numerics.Vector2(5f, 0f), center + new System.Numerics.Vector2(5f, 0f), brush, 1.4f);
-            rt.DrawLine(center - new System.Numerics.Vector2(0f, 5f), center + new System.Numerics.Vector2(0f, 5f), brush, 1.4f);
-            rt.DrawLine(center - new System.Numerics.Vector2(3.5f, 3.5f), center + new System.Numerics.Vector2(3.5f, 3.5f), brush, 1.4f);
-            rt.DrawLine(center - new System.Numerics.Vector2(3.5f, -3.5f), center + new System.Numerics.Vector2(3.5f, -3.5f), brush, 1.4f);
-        }
-        else if (state is 1 or 2 or 4)
-        {
-            const float radius = 4.8f;
-            var ring = new Ellipse(center, radius, radius);
-            rt.DrawEllipse(ring, brush, 1f);
-            if (percent >= 100) rt.FillEllipse(ring, brush);
-            else if (percent > 0)
-            {
-                float angle = percent * MathF.Tau / 100f;
-                using var sector = _d2d.CreatePathGeometry();
-                using var sink = sector.Open();
-                sink.BeginFigure(center, FigureBegin.Filled);
-                sink.AddLine(new System.Numerics.Vector2(x, y - radius));
-                sink.AddArc(new ArcSegment
-                {
-                    Point = new System.Numerics.Vector2(x + radius * MathF.Sin(angle), y - radius * MathF.Cos(angle)),
-                    Size = new Size(radius, radius),
-                    SweepDirection = SweepDirection.Clockwise,
-                    ArcSize = percent > 50 ? ArcSize.Large : ArcSize.Small,
-                });
-                sink.EndFigure(FigureEnd.Closed);
-                sink.Close();
-                rt.FillGeometry(sector, brush);
-            }
-        }
-        else if (state == 3 || (status == AgentStatus.Active && !session.ActivePane.S.HasExited))
-        {
-            if (!_statusAnimationPending)
-                _statusAnimationPending = SetTimer(_hwnd, (IntPtr)StatusAnimationTimer, StatusFrameMs, IntPtr.Zero) != IntPtr.Zero;
-            int frame = (int)(Environment.TickCount64 / StatusFrameMs % 8);
-            for (int i = 0; i < 8; i++)
-            {
-                float angle = i * MathF.Tau / 8f;
-                var direction = new System.Numerics.Vector2(MathF.Cos(angle), MathF.Sin(angle));
-                brush.Color = WithA(color, color.A * (1f - ((frame - i + 8) % 8) * 0.11f));
-                rt.DrawLine(center + direction * 2.8f, center + direction * 5.2f, brush, 1.3f);
-            }
-        }
-        else if (status == AgentStatus.Completed)
-        {
-            var bend = new System.Numerics.Vector2(x - 1.2f, y + 3.4f);
-            rt.DrawLine(new System.Numerics.Vector2(x - 4.7f, y), bend, brush, 1.5f);
-            rt.DrawLine(bend, new System.Numerics.Vector2(x + 4.7f, y - 3.4f), brush, 1.5f);
-        }
-        else return false;
+        if (status == AgentStatus.Idle) return false;
+        var color = StatusColor(status);
+        brush.Color = AggBlink(session) && !_cursorOn ? WithA(color, 0.25f) : color;
+        rt.FillEllipse(new Ellipse(new System.Numerics.Vector2(x, y), 4.5f, 4.5f), brush);
         return true;
     }
 
@@ -306,7 +245,7 @@ internal partial class Program
             if (exitCode is int code)
                 _sidebarNames.Add(new SidebarNameHit(s, $"{unread} unread; session ended (exit {code})", badgeX, y, badgeWidth, rowH));
         }
-        DrawSessionStatus(rt, brush, s, _sidebarW - 16f, y + rowH / 2f);
+        DrawAgentStatusDot(rt, brush, s, _sidebarW - 16f, y + rowH / 2f);
         _sidebarRows.Add((y, y + rowH, false, s));
     }
 
@@ -1365,7 +1304,7 @@ internal partial class Program
             float tx = px + 16f;
             if (it.Session is { } session)
             {
-                DrawSessionStatus(rt, brush, session, px + 16f, ry + rowH / 2f);
+                DrawAgentStatusDot(rt, brush, session, px + 16f, ry + rowH / 2f);
                 tx = px + 30f;
             }
             bool hasSub = it.Secondary.Length > 0;
