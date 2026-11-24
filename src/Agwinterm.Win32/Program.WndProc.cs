@@ -188,6 +188,7 @@ internal partial class Program
             case WM_APP_REDRAW:
                 {
                     System.Threading.Interlocked.Exchange(ref _redrawPending, 0);
+                    ScheduleWindowCaption();
                     // Frame cap (RedrawMinIntervalMs): paint immediately when quiet; under sustained
                     // output defer to a one-shot timer so floods render at ~66fps instead of per chunk.
                     long since = Environment.TickCount64 - _lastPaintTick;
@@ -213,6 +214,13 @@ internal partial class Program
 
             case WM_TIMER:
                 if ((int)wParam == HudTimer) { HudTick(); return IntPtr.Zero; }
+                if ((int)wParam == WindowCaptionTimer)
+                {
+                    KillTimer(hwnd, wParam);
+                    _windowCaptionPending = false;
+                    SyncWindowCaption();
+                    return IntPtr.Zero;
+                }
                 if ((int)wParam == 2) { _toastText = null; _toastTarget = null; KillTimer(hwnd, (IntPtr)2); InvalidateRect(hwnd, IntPtr.Zero, false); return IntPtr.Zero; }
                 if ((int)wParam == SelAutoTimer) { SelAutoscrollTick(); return IntPtr.Zero; }
                 if ((int)wParam == HoverTimer) { HoverTick(); return IntPtr.Zero; }

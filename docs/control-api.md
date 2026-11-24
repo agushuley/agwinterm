@@ -34,7 +34,7 @@ agwintermctl sidebar width 300               # move the divider; the reply is th
 agwintermctl session split on --axis horizontal   # stack the panes; the reply is the split pane's id
 agwintermctl session split close --target <pane>  # close EITHER pane; the reply is the survivor's id
 agwintermctl session swap                    # the two panes change places; every id stays where it was
-agwintermctl session status blocked --sound  # report agent status (a dot + bell in the UI)
+agwintermctl session status blocked --sound  # report agent status (a dot and title-bar bell)
 agwintermctl notify "build finished" --category ok  # green unread badge when the session is not in view
 agwintermctl session new --name build        # from a pane: lands in THAT pane's workspace, not the last-clicked one
 agwintermctl session new --name build --workspace-name CI --create-workspace
@@ -72,7 +72,7 @@ new colors should check the serving app version first.
 The unread count remains the total number of messages. Its color reflects the highest-priority
 unread category: `attention` red, then `normal` yellow, then `ok` green. Visiting the session or
 running `session seen` clears the count and category. A notification in the currently focused pane
-does not add an unread badge while the window is active. The agent-status circle is independent.
+does not add an unread badge while the window is active. The agent-status dot is independent.
 The three badge colors can be changed in Settings → Notifications or with `agwintermctl config set
 notification-color-ok "#RRGGBB"` (likewise for `notification-color-normal` and
 `notification-color-attention`). This changes only presentation, not category priority or the count.
@@ -283,6 +283,11 @@ session node, so an agent that sets it when it starts a task leaves a note every
 
 `session rename <name>` is its neighbour: the short custom name, same target resolution, and the two
 survive each other (renaming does not clear the context).
+
+For sessions without an explicit name, the focused pane's terminal title (OSC 0 or 2) becomes
+the live session name in the sidebar, window caption, and `tree --json`. The focused pane's
+current directory name is the fallback. Activity symbols in the title are supplied by the program.
+Use session IDs for scripts that need stable targets.
 
 ## `session split` and `session swap`
 

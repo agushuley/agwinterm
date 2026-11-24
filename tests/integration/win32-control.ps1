@@ -1404,6 +1404,48 @@ for ($i = 0; $i -lt 60; $i++) { & '__CTL__' session overlay resize --size-percen
             ((-not $badOp.ok) -and ([string]$badOp.error).Contains('sideways')) "reply=$($badOp | ConvertTo-Json -Compress)"
         Invoke-Ctl @('sidebar', 'width', '220') | Out-Null
 
+        $oscTopic = 'Agent task ' + $testToken.Substring(0, 8)
+        $oscTitle = "$([char]0x2733) $oscTopic"
+        $oscSession = Invoke-Ctl @('session', 'new', '--command', "[Console]::Title = [string][char]0x2733 + ' $oscTopic'", '--no-select')
+        if ($oscSession.ok) {
+            $oscId = [string]$oscSession.result
+            try {
+                for ($i = 0; $i -lt 30; $i++) {
+                    $oscNode = Get-SessionSnapshot $oscId
+                    if ($oscNode.name -eq $oscTitle) { break }
+                    Start-Sleep -Milliseconds 200
+                }
+                Check 'a background session displays the star supplied by the program title' ($oscNode.name -eq $oscTitle -and -not $oscNode.active) "name=$($oscNode.name)"
+                foreach ($prefix in 0x25D0, 0x2819) {
+                    $oscTitle = "$([char]$prefix) $oscTopic"
+                    $titleCommand = "[Console]::Title = [string][char]$prefix + ' $oscTopic'"
+                    $update = Invoke-Ctl @('session', 'type', "$titleCommand`r", '--target', $oscId)
+                    for ($i = 0; $i -lt 30; $i++) {
+                        $oscNode = Get-SessionSnapshot $oscId
+                        if ($oscNode.name -eq $oscTitle) { break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                    Check "the background session follows title prefix U+$($prefix.ToString('X4'))" ($update.ok -and $oscNode.name -eq $oscTitle -and -not $oscNode.active) "name=$($oscNode.name)"
+                }
+                Invoke-Ctl @('session', 'select', $oscId) | Out-Null
+                for ($i = 0; $i -lt 20; $i++) {
+                    $process.Refresh()
+                    if ($process.MainWindowTitle -eq $oscTitle) { break }
+                    Start-Sleep -Milliseconds 100
+                }
+                Check 'the native window caption follows the selected session title' ($process.MainWindowTitle -eq $oscTitle) "caption=$($process.MainWindowTitle)"
+                $rename = Invoke-Ctl @('session', 'rename', 'Pinned task', '--target', $oscTitle)
+                $oscNode = Get-SessionSnapshot $oscId
+                Check 'a live title resolves as a target and an explicit rename takes priority' `
+                    ($rename.ok -and $rename.result.session -eq $oscId -and $oscNode.name -eq 'Pinned task') "name=$($oscNode.name)"
+            } finally {
+                Invoke-Ctl @('session', 'close', $oscId) | Out-Null
+                Invoke-Ctl @('session', 'select', $sessionId) | Out-Null
+            }
+        } else {
+            Check 'create background session for program title checks' $false "$($oscSession.error)"
+        }
+
         Invoke-Ctl @('sidebar', 'hide') | Out-Null
         Start-Sleep -Milliseconds 500
 

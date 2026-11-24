@@ -226,37 +226,41 @@ internal partial class Program
         return s.ActivePane.StartCwd;
     }
 
-    /// <summary>The path used as a session's title-bar label when no custom name or program title
-    /// takes precedence (<see cref="SessionDisplayName"/>): live OSC 7 cwd if the shell reports it,
-    /// else the pane's launch dir, else the process cwd — so the fallback is a real path, out of the box.</summary>
-    private static string TitleCwd(Ses s)
+    private static string? ReadProgramTitle(string title)
     {
-        string live = SafeCwd(s);
-        if (!string.IsNullOrWhiteSpace(live)) return PrettyCwd(live);
-        string? start = s.ActivePane.StartCwd;
-        return string.IsNullOrWhiteSpace(start) ? Environment.CurrentDirectory : start!;
+        // ConPTY also reports the default console title, commonly an executable or absolute path.
+        if (string.IsNullOrWhiteSpace(title) || title.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            || (title.Length >= 2 && title[1] == ':' && title.Contains('\\'))) return null;
+        return title;
     }
 
-    /// <summary>Title-bar display name (agterm precedence): custom name → program OSC title → cwd basename → app name.</summary>
-    private static string SessionDisplayName(Ses s)
+    private static string PaneDisplayName(Pane pane)
     {
-        if (!string.IsNullOrWhiteSpace(s.CustomName)) return s.CustomName!;
-        // A program's OSC title (e.g. "claude") — but ignore the shell's default console title,
-        // which on Windows is the bare exe path (…\powershell.exe) or an absolute path (noise).
-        string osc = s.ActivePane.S.Emulator.Title;
-        bool oscMeaningful = !string.IsNullOrWhiteSpace(osc)
-            && !osc.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            && !(osc.Length >= 2 && osc[1] == ':' && osc.Contains('\\')); // not a bare C:\… path
-        if (oscMeaningful) return osc;
-        // Single-row title = the full current path (agterm-style "just the path"), home collapsed to ~.
-        string cwd = PrettyCwd(TitleCwd(s)).TrimEnd('\\', '/');
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\', '/');
-        if (!string.IsNullOrEmpty(home))
-        {
-            if (string.Equals(cwd, home, StringComparison.OrdinalIgnoreCase)) return "~";
-            if (cwd.StartsWith(home + "\\", StringComparison.OrdinalIgnoreCase)) return "~" + cwd[home.Length..];
-        }
-        return string.IsNullOrWhiteSpace(cwd) ? "agwinterm" : cwd;
+        if (pane.ProgramTitle is { } title) return title;
+        string live = pane.S.Emulator.Cwd;
+        string? cwd = string.IsNullOrWhiteSpace(live) ? pane.StartCwd : PrettyCwd(live);
+        if (string.IsNullOrWhiteSpace(cwd)) return "~";
+        string basename = Path.GetFileName(cwd.TrimEnd('\\', '/'));
+        return basename.Length == 0 ? cwd : basename;
+    }
+
+    private const int WindowCaptionTimer = 16;
+    private bool _windowCaptionPending;
+    private string _windowCaption = AppName;
+
+    private void ScheduleWindowCaption()
+    {
+        if (_isQuickWindow || _windowCaptionPending) return;
+        // OSC titles can contain an animated spinner. Coalesce writes to the native caption.
+        _windowCaptionPending = SetTimer(_hwnd, (IntPtr)WindowCaptionTimer, 250, IntPtr.Zero) != IntPtr.Zero;
+        if (!_windowCaptionPending) SyncWindowCaption();
+    }
+
+    private void SyncWindowCaption()
+    {
+        string caption = _active?.DisplayName ?? AppName;
+        if (!string.IsNullOrEmpty(WinName)) caption += $" — {WinName}";
+        if (caption != _windowCaption && SetWindowTextW(_hwnd, caption)) _windowCaption = caption;
     }
 
     private static string PrettyCwd(string raw)
@@ -313,9 +317,8 @@ internal partial class Program
         float scratchX = _config.ShowScratchButton ? (x -= bw) : float.NaN;
         float rgLeft = x;                            // leftmost used edge — the title must stop before it
 
-        // 3. Title at the terminal's leading edge (right of the sidebar): a SINGLE centered row
-        // showing the path (agterm-style): custom name -> program OSC title -> full cwd path.
-        string title = _active is not null ? SessionDisplayName(_active) : AppName;
+        // 3. Session name at the terminal's leading edge (right of the sidebar).
+        string title = _active?.DisplayName ?? AppName;
         // 4. Attention bell (can be hidden via settings; when hidden it reserves no space).
         bool showBell = _config.AttentionButton;
         // The menu bar (MenuBar.cs) sits where the title used to start and the title moves right by
@@ -393,7 +396,7 @@ internal partial class Program
         {
             float bellX = MathF.Min(runEnd + bellGap, rgLeft - bellW - clockW - 14f);
             var (bellBlocked, bellActive) = AttentionState();
-            var bellBase = bellBlocked ? StatusDot(AgentStatus.Blocked) : (bellActive ? ChromeText : ChromeDim);
+            var bellBase = bellBlocked ? StatusColor(AgentStatus.Blocked) : (bellActive ? ChromeText : ChromeDim);
             if ((bellBlocked || bellActive) && !_cursorOn && AnyBlinkAttention())
                 bellBase = new Color4(bellBase.R, bellBase.G, bellBase.B, 0.30f); // pulse when a blinking session needs attention
             var c = ChromeBtnBg(rt, brush, bellX, 0, bellW, TitleBarH, "attention", _titleButtons, bellBase);
@@ -1663,7 +1666,7 @@ internal partial class Program
                     {
                         Id = s.Id,
                         Name = s.Name,
-                        CustomName = s.CustomName,
+                        CustomName = s.CustomName ?? "",
                         Context = s.Context,   // P3: null = no key written (RestoreState explains why)
                         Profile = s.ProfileName,
                         Env = s.Env.Count == 0 ? null : s.Env,
@@ -1887,7 +1890,12 @@ internal partial class Program
                                 }
                             }
                     ses.Flagged = s.Flagged;
-                    ses.CustomName = string.IsNullOrWhiteSpace(s.CustomName) ? null : s.CustomName;
+                    // Older snapshots left CustomName null for names supplied at creation.
+                    // An empty CustomName records an automatic name even with a saved alias.
+                    bool autoName = ses.Name.StartsWith("session ", StringComparison.Ordinal) &&
+                        int.TryParse(ses.Name.AsSpan("session ".Length), System.Globalization.NumberStyles.None, null, out _);
+                    ses.CustomName = s.CustomName is null && !autoName ? ses.Name :
+                        string.IsNullOrWhiteSpace(s.CustomName) ? null : s.CustomName;
                     ses.Context = RestoreState.LoadContext(s.Context); // validated, not trusted: an out-of-rules value is dropped, not shown
                     if (!string.IsNullOrEmpty(s.BgFile)) // restore the watermark if its copied file still exists
                     {

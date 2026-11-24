@@ -17,9 +17,9 @@ internal partial class Program
         // Session identity must be explicit if a split/auxiliary pane was named. A HUD is not
         // a pane overlay and has no PTY id of its own. Resolve/check/write in this same UI hop.
         var ses = target is null or "active" ? _active : FindSessionByExactId(
-            SessionHuds.ResolveTarget(target, AllSessions().Select(s => new SessionHuds.Target(s.Id, s.Name,
+            SessionHuds.ResolveTarget(target, AllSessions().Select(s => new SessionHuds.Target(s.Id, s.DisplayName,
                 s.Panes.Select(p => p.Id).Concat(s.Panes.Select(p => p.Overlay.Term?.Id).OfType<string>())
-                    .Concat(new[] { s.Scratch?.Id, s.Overlay.Term?.Id }.OfType<string>()))),
+                    .Concat(new[] { s.Scratch?.Id, s.Overlay.Term?.Id }.OfType<string>()), s.Name)),
                 new[] { _quick?.Id }.OfType<string>()) ?? "");
         if (ses is null) return ISessionHost.RefusePrefix + "hud: no session matches that target";
         if (target is null or "active")

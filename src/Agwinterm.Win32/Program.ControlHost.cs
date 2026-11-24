@@ -199,7 +199,7 @@ internal partial class Program
                 w.Sessions.Select(s =>
                 {
                     var (status, statusChangedAt) = AggStatusAndAt(s);
-                    return new SessionSnapshot(s.Id, s.Name, ReferenceEquals(s, _active), status,
+                    return new SessionSnapshot(s.Id, s.DisplayName, ReferenceEquals(s, _active), status,
                         s.Overlay.Term is not null, UnreadOf(s), s.Flagged, s.BgPath is not null,
                         FocusedPane: Math.Clamp(s.Active, 0, Math.Max(0, s.Panes.Count - 1)), PaneCount: s.Panes.Count,
                         StatusBlink: AggBlink(s), OverlaySize: s.Overlay.SizePercent,
@@ -223,12 +223,13 @@ internal partial class Program
     // Read-back snapshot: plain field reads + a Win32 query, safe from the pipe thread (worst case slightly stale).
     public WindowStateSnapshot WindowState()
     {
-        var a = _active;
+        string? activeName;
+        lock (_workspaces) activeName = _active?.DisplayName;
         return new WindowStateSnapshot(
             SidebarVisible: _sidebarW > 0, Fullscreen: _fullscreen, Maximized: IsZoomed(_hwnd),
             QuickTerminalVisible: _quickHost?._quickVisible == true,
             // ActiveSession is the NAME; session.context is not a name and is not folded in — it is read from the tree (P3).
-            ActiveWorkspace: CurrentWorkspace()?.Name, ActiveSession: a is null ? null : (a.CustomName ?? a.Name));
+            ActiveWorkspace: CurrentWorkspace()?.Name, ActiveSession: activeName);
     }
 
     /// <summary>

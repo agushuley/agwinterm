@@ -709,10 +709,9 @@ internal partial class Program
             var s = _mruSnapshot[i];
             float ry = py + headH + i * rowH;
             if (i == _mruIdx) { brush.Color = PalSel; rt.FillRectangle(new Rect(px + 4f, ry, pw - 8f, rowH), brush); }
-            brush.Color = StatusDot(AggStatus(s));
-            rt.FillEllipse(new Ellipse(new System.Numerics.Vector2(px + 18f, ry + rowH / 2f), 4.5f, 4.5f), brush);
+            DrawAgentStatusDot(rt, brush, s, px + 18f, ry + rowH / 2f);
             brush.Color = i == _mruIdx ? SbActiveText : ChromeText;
-            rt.DrawText(s.Name, _uiFont, new Rect(px + 32f, ry + (rowH - 20f) / 2f, pw - 150f, 20f), brush);
+            rt.DrawText(s.DisplayName, _uiFont, new Rect(px + 32f, ry + (rowH - 20f) / 2f, pw - 150f, 20f), brush);
             brush.Color = ChromeDim;
             float wsw = MeasureText(s.Ws.Name, _uiSmall);
             rt.DrawText(s.Ws.Name, _uiSmall, new Rect(px + pw - 16f - wsw, ry + (rowH - 16f) / 2f, wsw + 2f, 16f), brush);
